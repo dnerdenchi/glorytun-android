@@ -1,0 +1,1 @@
+D:\Own\Bonding\glorytun-android\app\src\main\cpp\CMakeLists.txt
