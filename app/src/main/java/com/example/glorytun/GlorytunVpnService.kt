@@ -47,7 +47,7 @@ class GlorytunVpnService : VpnService() {
                 // ルーティング（VPNサブネットのみ、またはサーバー側指定に合わせて）
                 builder.addRoute("10.0.1.0", 24)
                 // MTU等の設定
-                // 1472-byte probe を通せるように、TUN MTU は 1500 を使用する
+                // Use 1500 so 1472-byte PMTU probes can pass; lower links may fragment/drop.
                 builder.setMtu(1500)
 
                 // 外部への接続設定を追加など
