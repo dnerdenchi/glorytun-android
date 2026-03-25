@@ -44,8 +44,16 @@ class GlorytunVpnService : VpnService() {
                 builder.setSession("Glorytun VPN")
                 // クライアントの仮想IPアドレス (環境に合わせて要調整)
                 builder.addAddress("10.0.1.2", 24)
-                // ルーティング（VPNサブネットのみ、またはサーバー側指定に合わせて）
-                builder.addRoute("10.0.1.0", 24)
+                // フルトンネル化（すべてのトラフィックをVPN経由にする）
+                builder.addRoute("0.0.0.0", 0)
+                builder.addRoute("::", 0)
+                // VPNサブネットへのルートも維持
+                // builder.addRoute("10.0.1.0", 24)
+                
+                // DNSサーバーの設定（VPN経由で名前解決するため）
+                builder.addDnsServer("8.8.8.8")
+                builder.addDnsServer("1.1.1.1")
+                
                 // MTU等の設定
                 builder.setMtu(1420)
 
