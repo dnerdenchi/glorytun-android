@@ -1,10 +1,19 @@
 #include <jni.h>
 #include <string.h>
 #include <android/log.h>
+#include "sodium.h"
 #include <pthread.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+#include "mud/mud.h"
+
+/* bind.c が mud 作成後にセットするグローバル mud ポインタ */
+extern struct mud *g_mud;
 
 #define LOG_TAG "GlorytunNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -56,7 +65,11 @@ __attribute__((used)) int protect_socket_from_c(int fd) {
     if (protect_method) {
         jboolean b_ret = (*env)->CallBooleanMethod(env, g_vpn_service, protect_method, fd);
         ret = (int)b_ret;
-        LOGI("protect_socket_from_c(fd=%d) called, result: %d", fd, ret);
+        if (ret) {
+            LOGI("protect_socket_from_c(fd=%d): SUCCESS", fd);
+        } else {
+            LOGE("protect_socket_from_c(fd=%d): FAILED (returned false) - routing loop risk!", fd);
+        }
     } else {
         LOGE("protect_socket_from_c(fd=%d): Method 'protect' not found", fd);
     }
@@ -68,7 +81,9 @@ __attribute__((used)) int protect_socket_from_c(int fd) {
 }
 
 #include <sys/socket.h>
+#undef socket
 int gt_socket(int domain, int type, int protocol) {
+    LOGI("gt_socket called (domain=%d, type=%d, protocol=%d)", domain, type, protocol);
     int fd = socket(domain, type, protocol);
     if (fd >= 0) {
         if (domain == AF_INET || domain == AF_INET6) {
@@ -77,10 +92,20 @@ int gt_socket(int domain, int type, int protocol) {
     }
     return fd;
 }
+#define socket gt_socket
 
 // 擬似的なGlorytunの起動スレッド
 void* glorytun_thread(void* arg) {
+    // Androidのシグナル（SIGQUIT=ANRチェック等）がglorytunの
+    // シグナルハンドラに届いてgt_quit=1にならないよう、
+    // このスレッドで全シグナルをブロックする。
+    // 停止はstopGlorytunNative()からgt_quit=1で行う。
+    sigset_t blocked;
+    sigfillset(&blocked);
+    pthread_sigmask(SIG_BLOCK, &blocked, NULL);
+
     LOGI("Glorytun thread started with FD: %d", android_tun_fd);
+
     
     // argには char** （argvの配列）が渡されている想定
     char **argv = (char **)arg;
@@ -162,6 +187,7 @@ Java_com_example_glorytun_GlorytunVpnService_startGlorytunNative(JNIEnv *env, jo
     if (f) {
         fputs(clean_secret, f);
         fclose(f);
+        sodium_memzero(clean_secret, sizeof(clean_secret));
     } else {
         LOGE("Failed to write keyfile to %s", keyfile_path);
         (*env)->ReleaseStringUTFChars(env, ip, ip_c);
@@ -204,13 +230,135 @@ Java_com_example_glorytun_GlorytunVpnService_startGlorytunNative(JNIEnv *env, jo
     return 0;
 }
 
-#include <signal.h>
-extern volatile sig_atomic_t gt_quit;
-
 JNIEXPORT void JNICALL
 Java_com_example_glorytun_GlorytunVpnService_stopGlorytunNative(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     is_running = 0;
     gt_quit = 1;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_glorytun_GlorytunVpnService_isGlorytunReady(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jboolean)(g_mud != NULL);
+}
+
+/* ----------------------------------------------------------------
+ * マルチパス用 JNI メソッド
+ * ---------------------------------------------------------------- */
+
+/* Kotlin 側の Network.bindSocket(fd) を JNI 経由で呼ぶ。
+ * networkHandle は Network.getNetworkHandle() の値。 */
+static int bind_socket_to_network(int fd, jlong network_handle) {
+    if (!g_jvm || !g_vpn_service) return 0;
+
+    JNIEnv *env;
+    int isAttached = 0;
+    if ((*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6) < 0) {
+        (*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL);
+        isAttached = 1;
+    }
+    jclass cls = (*env)->GetObjectClass(env, g_vpn_service);
+    jmethodID m = (*env)->GetMethodID(env, cls, "bindSocketToNetwork", "(IJ)Z");
+    int ret = 0;
+    if (m) {
+        jboolean r = (*env)->CallBooleanMethod(env, g_vpn_service, m,
+                                               (jint)fd, network_handle);
+        ret = (int)r;
+        LOGI("bindSocketToNetwork(fd=%d, handle=%lld): %s", fd,
+             (long long)network_handle, ret ? "OK" : "FAIL");
+    }
+    if (isAttached) (*g_jvm)->DetachCurrentThread(g_jvm);
+    return ret;
+}
+
+/* addPathForNetwork(localIp: String, networkHandle: Long): Int
+ * 新しいネットワーク (WiFi or SIM) のパスを mud に追加する。
+ * 1. socket() を作成
+ * 2. VpnService.protect() でルーティングループ防止
+ * 3. Network.bindSocket() で特定ネットワークに紐付け
+ * 4. mud_set_path_socket() でパスに割り当て */
+JNIEXPORT jint JNICALL
+Java_com_example_glorytun_GlorytunVpnService_addPathForNetwork(
+        JNIEnv *env, jobject thiz,
+        jstring local_ip, jlong network_handle) {
+    (void)thiz;
+
+    if (!g_mud) {
+        LOGE("addPathForNetwork: glorytun not running");
+        return -1;
+    }
+
+    const char *lip = (*env)->GetStringUTFChars(env, local_ip, 0);
+    LOGI("addPathForNetwork: local_ip=%s handle=%lld", lip, (long long)network_handle);
+
+    /* ローカルアドレスを解析 */
+    union mud_sockaddr local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    if (inet_pton(AF_INET, lip, &local_addr.sin.sin_addr) == 1) {
+        local_addr.sin.sin_family = AF_INET;
+        local_addr.sin.sin_port = 0;
+    } else if (inet_pton(AF_INET6, lip, &local_addr.sin6.sin6_addr) == 1) {
+        local_addr.sin6.sin6_family = AF_INET6;
+        local_addr.sin6.sin6_port = 0;
+    } else {
+        LOGE("addPathForNetwork: invalid IP address: %s", lip);
+        (*env)->ReleaseStringUTFChars(env, local_ip, lip);
+        return -1;
+    }
+    (*env)->ReleaseStringUTFChars(env, local_ip, lip);
+
+    /* 新しいソケットを作成 */
+    int fd = socket(local_addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        LOGE("addPathForNetwork: socket() failed: %s", strerror(errno));
+        return -1;
+    }
+
+    /* VPN ルーティングループを防止 */
+    protect_socket_from_c(fd);
+
+    /* 特定ネットワークにバインド */
+    if (!bind_socket_to_network(fd, network_handle)) {
+        LOGE("addPathForNetwork: bindSocketToNetwork failed");
+        close(fd);
+        return -1;
+    }
+
+    /* mud にパス専用ソケットを登録 */
+    if (mud_set_path_socket(g_mud, &local_addr, fd) != 0) {
+        LOGE("addPathForNetwork: mud_set_path_socket failed (path may not exist yet)");
+        close(fd);
+        return -1;
+    }
+
+    LOGI("addPathForNetwork: SUCCESS fd=%d", fd);
+    return 0;
+}
+
+/* removePathForNetwork(localIp: String): Int
+ * ネットワーク消滅時にパスの専用ソケットを解除する */
+JNIEXPORT jint JNICALL
+Java_com_example_glorytun_GlorytunVpnService_removePathForNetwork(
+        JNIEnv *env, jobject thiz, jstring local_ip) {
+    (void)thiz;
+
+    if (!g_mud) return -1;
+
+    const char *lip = (*env)->GetStringUTFChars(env, local_ip, 0);
+
+    union mud_sockaddr local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    if (inet_pton(AF_INET, lip, &local_addr.sin.sin_addr) == 1) {
+        local_addr.sin.sin_family = AF_INET;
+    } else if (inet_pton(AF_INET6, lip, &local_addr.sin6.sin6_addr) == 1) {
+        local_addr.sin6.sin6_family = AF_INET6;
+    }
+    (*env)->ReleaseStringUTFChars(env, local_ip, lip);
+
+    int ret = mud_clear_path_socket(g_mud, &local_addr);
+    LOGI("removePathForNetwork: %s", ret == 0 ? "OK" : "path not found");
+    return ret;
 }
