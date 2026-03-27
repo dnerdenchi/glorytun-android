@@ -1,0 +1,19 @@
+# Android
+build/
+.gradle/
+.idea/
+local.properties
+*.iml
+
+# App specific
+app/build/
+app/.cxx/
+
+# JNI
+app/src/main/cpp/glorytun/
+app/src/main/cpp/libsodium/
+# (If these are downloaded/generated)
+
+# OS
+.DS_Store
+Thumbs.db

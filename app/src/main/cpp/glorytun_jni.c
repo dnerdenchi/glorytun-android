@@ -22,6 +22,10 @@ extern struct mud *g_mud;
 static int is_running = 0;
 int android_tun_fd = -1;
 
+/* addPathForNetwork() でパス作成に使うサーバーアドレス */
+static union mud_sockaddr g_server_addr;
+static int g_server_addr_ready = 0;
+
 #include <signal.h>
 extern volatile sig_atomic_t gt_quit;
 
@@ -158,6 +162,21 @@ Java_com_example_glorytun_GlorytunVpnService_startGlorytunNative(JNIEnv *env, jo
 
     LOGI("Received config -> IP: %s, Port: %s", ip_c, port_c);
 
+    /* addPathForNetwork() でSIMパスを作成するためにサーバーアドレスを保存 */
+    memset(&g_server_addr, 0, sizeof(g_server_addr));
+    g_server_addr_ready = 0;
+    int port_num = atoi(port_c);
+    if (inet_pton(AF_INET, ip_c, &g_server_addr.sin.sin_addr) == 1) {
+        g_server_addr.sin.sin_family = AF_INET;
+        g_server_addr.sin.sin_port   = htons((uint16_t)port_num);
+        g_server_addr_ready = 1;
+    } else if (inet_pton(AF_INET6, ip_c, &g_server_addr.sin6.sin6_addr) == 1) {
+        g_server_addr.sin6.sin6_family = AF_INET6;
+        g_server_addr.sin6.sin6_port   = htons((uint16_t)port_num);
+        g_server_addr_ready = 1;
+    }
+    LOGI("server addr saved: %s:%d (ready=%d)", ip_c, port_num, g_server_addr_ready);
+
     // keyfileを書き出す
     const char *keyfile_path = "/data/data/com.example.glorytun/cache/keyfile.txt";
     
@@ -236,6 +255,7 @@ Java_com_example_glorytun_GlorytunVpnService_stopGlorytunNative(JNIEnv *env, job
     (void)thiz;
     is_running = 0;
     gt_quit = 1;
+    g_server_addr_ready = 0;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -327,9 +347,26 @@ Java_com_example_glorytun_GlorytunVpnService_addPathForNetwork(
         return -1;
     }
 
+    /* mud にパスが未登録の場合（SIM等、接続後に追加されるインターフェース）は
+     * mud_set_path() で先にパスを作成してから mud_set_path_socket() に進む */
+    if (g_server_addr_ready) {
+        struct mud_path_conf path_conf;
+        memset(&path_conf, 0, sizeof(path_conf));
+        path_conf.state       = MUD_UP;
+        path_conf.local       = local_addr;
+        path_conf.remote      = g_server_addr;
+        path_conf.tx_max_rate = 10000000;
+        path_conf.rx_max_rate = 10000000;
+        path_conf.beat        = 1000;
+        int pr = mud_set_path(g_mud, &path_conf);
+        LOGI("addPathForNetwork: mud_set_path: %s (errno=%d)",
+             pr == 0 ? "OK" : "FAIL/already-exists", errno);
+        /* pr != 0 でも errno==0 なら既存パスの更新なので続行する */
+    }
+
     /* mud にパス専用ソケットを登録 */
     if (mud_set_path_socket(g_mud, &local_addr, fd) != 0) {
-        LOGE("addPathForNetwork: mud_set_path_socket failed (path may not exist yet)");
+        LOGE("addPathForNetwork: mud_set_path_socket failed");
         close(fd);
         return -1;
     }
@@ -361,4 +398,50 @@ Java_com_example_glorytun_GlorytunVpnService_removePathForNetwork(
     int ret = mud_clear_path_socket(g_mud, &local_addr);
     LOGI("removePathForNetwork: %s", ret == 0 ? "OK" : "path not found");
     return ret;
+}
+
+/* getPathStatsForIp(localIp: String): LongArray?
+ * 指定ローカルIPのパス統計を返す: [tx_bytes, rx_bytes, tx_rate, rx_rate]
+ * パスが存在しない場合は null を返す */
+JNIEXPORT jlongArray JNICALL
+Java_com_example_glorytun_GlorytunVpnService_getPathStatsForIp(
+        JNIEnv *env, jobject thiz, jstring local_ip_str) {
+    (void)thiz;
+
+    if (!g_mud) return NULL;
+
+    const char *lip = (*env)->GetStringUTFChars(env, local_ip_str, 0);
+
+    union mud_sockaddr local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    if (inet_pton(AF_INET, lip, &local_addr.sin.sin_addr) == 1) {
+        local_addr.sin.sin_family = AF_INET;
+        local_addr.sin.sin_port   = 0;
+    } else if (inet_pton(AF_INET6, lip, &local_addr.sin6.sin6_addr) == 1) {
+        local_addr.sin6.sin6_family = AF_INET6;
+        local_addr.sin6.sin6_port   = 0;
+    } else {
+        (*env)->ReleaseStringUTFChars(env, local_ip_str, lip);
+        return NULL;
+    }
+    (*env)->ReleaseStringUTFChars(env, local_ip_str, lip);
+
+    struct mud_paths paths;
+    memset(&paths, 0, sizeof(paths));
+    if (mud_get_paths(g_mud, &paths, &local_addr, NULL) != 0 || paths.count == 0)
+        return NULL;
+
+    struct mud_path *path = &paths.path[0];
+    jlong data[4] = {
+        (jlong)path->tx.bytes,
+        (jlong)path->rx.bytes,
+        (jlong)path->tx.rate,
+        (jlong)path->rx.rate
+    };
+
+    jlongArray result = (*env)->NewLongArray(env, 4);
+    if (result) {
+        (*env)->SetLongArrayRegion(env, result, 0, 4, data);
+    }
+    return result;
 }
