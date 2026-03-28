@@ -1,3 +1,36 @@
 <resources>
-    <string name="app_name">Glorytun VPN</string>
+    <string name="app_name">BondVPN</string>
+    <string name="nav_dashboard">ダッシュボード</string>
+    <string name="nav_stats">利用状況</string>
+    <string name="nav_bonding">接続</string>
+    <string name="nav_settings">設定</string>
+    <string name="status_connected">接続中</string>
+    <string name="status_disconnected">未接続</string>
+    <string name="status_connecting">接続しています…</string>
+    <string name="status_disconnecting">切断しています…</string>
+    <string name="btn_connect">接続</string>
+    <string name="btn_disconnect">切断</string>
+    <string name="wifi_label">Wi-Fi</string>
+    <string name="sim_label">SIM</string>
+    <string name="traffic_monitor">通信量モニター</string>
+    <string name="total_data">合計データ</string>
+    <string name="avg_speed">平均速度</string>
+    <string name="max_throughput">最大スループット</string>
+    <string name="packet_loss">パケットロス</string>
+    <string name="latency">遅延</string>
+    <string name="session_data">セッションデータ</string>
+    <string name="settings_network">ネットワークプロトコル管理</string>
+    <string name="settings_bandwidth">帯域幅管理</string>
+    <string name="settings_appearance">外観設定</string>
+    <string name="settings_system">システム情報</string>
+    <string name="settings_security">高度な暗号化が有効</string>
+    <string name="profile_add">プロファイルを追加</string>
+    <string name="profile_edit">プロファイルを編集</string>
+    <string name="profile_delete">プロファイルを削除</string>
+    <string name="profile_update">プロファイルを更新</string>
+    <string name="server_ip">サーバー IP</string>
+    <string name="server_port">ポート番号</string>
+    <string name="secret_key">シークレットキー</string>
+    <string name="profile_name">プロファイル名</string>
+    <string name="security_note">設定はデバイスのハードウェアセキュリティモジュール(HSM)を使用してローカルで暗号化されます</string>
 </resources>
