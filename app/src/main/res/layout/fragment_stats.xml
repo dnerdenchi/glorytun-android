@@ -31,25 +31,15 @@
             android:layout_marginBottom="16dp">
 
             <TextView
-                android:id="@+id/filter_1h"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="1時間"
-                android:textColor="@color/on_surface"
-                android:textSize="13sp"
-                android:background="@drawable/bg_chip_selected" />
-
-            <TextView
                 android:id="@+id/filter_1d"
                 android:layout_width="0dp"
                 android:layout_height="36dp"
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="1日"
-                android:textColor="@color/on_surface_variant"
-                android:textSize="13sp" />
+                android:textColor="@color/on_surface"
+                android:textSize="13sp"
+                android:background="@drawable/bg_chip_selected" />
 
             <TextView
                 android:id="@+id/filter_1w"
@@ -68,6 +58,16 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="1ヶ月"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/filter_1y"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="1年"
                 android:textColor="@color/on_surface_variant"
                 android:textSize="13sp" />
 

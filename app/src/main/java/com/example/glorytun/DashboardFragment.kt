@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 
@@ -25,8 +26,8 @@ class DashboardFragment : Fragment() {
     private lateinit var tvWifiTotal: TextView
     private lateinit var tvSimTotal: TextView
     private lateinit var tvTotalData: TextView
-    private lateinit var tvPacketLoss: TextView
-    private lateinit var tvLatency: TextView
+    private lateinit var tvWifiThrottledBadge: TextView
+    private lateinit var tvSimThrottledBadge: TextView
     private lateinit var btnConnect: Button
     private lateinit var trafficGraph: TrafficGraphView
 
@@ -56,42 +57,71 @@ class DashboardFragment : Fragment() {
         tvWifiTotal = view.findViewById(R.id.tv_wifi_total)
         tvSimTotal = view.findViewById(R.id.tv_sim_total)
         tvTotalData = view.findViewById(R.id.tv_total_data)
-        tvPacketLoss = view.findViewById(R.id.tv_packet_loss)
-        tvLatency = view.findViewById(R.id.tv_latency)
+        tvWifiThrottledBadge = view.findViewById(R.id.tv_wifi_throttled_badge)
+        tvSimThrottledBadge = view.findViewById(R.id.tv_sim_throttled_badge)
         btnConnect = view.findViewById(R.id.btn_connect)
         trafficGraph = view.findViewById(R.id.traffic_graph)
+
+        // ViewModelに蓄積済みのリアルタイムデータを復元
+        trafficGraph.setData(
+            viewModel.realtimeWifiRates.toList(),
+            viewModel.realtimeSimRates.toList()
+        )
 
         viewModel.connectionState.observe(viewLifecycleOwner) { state ->
             updateConnectionUI(state)
         }
 
         viewModel.wifiKBs.observe(viewLifecycleOwner) { kbs ->
-            tvWifiSpeed.text = if (kbs > 0) "%.1f KB/s".format(kbs) else "-- KB/s"
-            trafficGraph.addDataPoint(kbs, viewModel.simKBs.value ?: 0f)
+            tvWifiSpeed.text = if (kbs > 0) viewModel.formatBps(kbs) else "-- kbps"
         }
 
         viewModel.simKBs.observe(viewLifecycleOwner) { kbs ->
-            tvSimSpeed.text = if (kbs > 0) "%.1f KB/s".format(kbs) else "-- KB/s"
+            tvSimSpeed.text = if (kbs > 0) viewModel.formatBps(kbs) else "-- kbps"
         }
 
-        viewModel.wifiTotalBytes.observe(viewLifecycleOwner) { bytes ->
-            tvWifiTotal.text = "合計: ${viewModel.formatBytes(bytes)}"
+        viewModel.wifiDailyBytes.observe(viewLifecycleOwner) { bytes ->
+            tvWifiTotal.text = "今日: ${viewModel.formatBytes(bytes)}"
             updateTotalData()
         }
 
-        viewModel.simTotalBytes.observe(viewLifecycleOwner) { bytes ->
-            tvSimTotal.text = "合計: ${viewModel.formatBytes(bytes)}"
+        viewModel.simDailyBytes.observe(viewLifecycleOwner) { bytes ->
+            tvSimTotal.text = "今日: ${viewModel.formatBytes(bytes)}"
             updateTotalData()
+        }
+
+        viewModel.wifiThrottled.observe(viewLifecycleOwner) { throttled ->
+            tvWifiThrottledBadge.visibility = if (throttled) View.VISIBLE else View.GONE
+        }
+
+        viewModel.simThrottled.observe(viewLifecycleOwner) { throttled ->
+            tvSimThrottledBadge.visibility = if (throttled) View.VISIBLE else View.GONE
+        }
+
+        tvWifiThrottledBadge.setOnClickListener {
+            Toast.makeText(requireContext(), "Wi-Fi が通信制限になっています", Toast.LENGTH_SHORT).show()
+        }
+
+        tvSimThrottledBadge.setOnClickListener {
+            Toast.makeText(requireContext(), "SIM が通信制限になっています", Toast.LENGTH_SHORT).show()
         }
 
         viewModel.serverIp.observe(viewLifecycleOwner) { ip ->
             val port = viewModel.serverPort.value ?: "5000"
-            tvServerInfo.text = if (ip.isNotEmpty()) "サーバー: $ip:$port" else "サーバー: 未設定"
+            tvServerInfo.text = if (ip.isNotEmpty()) "$ip:$port" else "サーバー: 未設定"
+        }
+
+        // リアルタイムグラフをViewModelのデータで更新
+        viewModel.realtimeUpdated.observe(viewLifecycleOwner) {
+            trafficGraph.setData(
+                viewModel.realtimeWifiRates.toList(),
+                viewModel.realtimeSimRates.toList()
+            )
         }
 
         btnConnect.setOnClickListener {
-            val isConnected = viewModel.connectionState.value == "Connected"
-            if (isConnected) {
+            val state = viewModel.connectionState.value
+            if (state == "Connected" || state == "Connecting...") {
                 disconnectVpn()
             } else {
                 val intent = VpnService.prepare(requireContext())
@@ -107,28 +137,37 @@ class DashboardFragment : Fragment() {
     private fun updateConnectionUI(state: String) {
         when (state) {
             "Connected" -> {
-                tvStatus.text = "接続中"
-                tvStatusBadge.text = "接続中"
+                tvStatus.text = "接続済み"
+                tvStatus.setTextColor(resources.getColor(R.color.tertiary, null))
+                tvStatusBadge.text = "接続済み"
                 tvStatusBadge.setTextColor(resources.getColor(R.color.tertiary, null))
+                btnConnect.background = ContextCompat.getDrawable(requireContext(), R.drawable.bg_connect_button)
                 btnConnect.text = "切断"
+                btnConnect.setTextColor(resources.getColor(R.color.on_primary, null))
             }
             "Connecting..." -> {
-                tvStatus.text = "接続しています…"
+                tvStatus.text = "接続中…"
+                tvStatus.setTextColor(resources.getColor(R.color.on_surface_variant, null))
                 tvStatusBadge.text = "接続中…"
-                btnConnect.text = "切断"
+                tvStatusBadge.setTextColor(resources.getColor(R.color.on_surface_variant, null))
+                btnConnect.background = ContextCompat.getDrawable(requireContext(), R.drawable.bg_connect_button)
+                btnConnect.text = "接続中…"
+                btnConnect.setTextColor(resources.getColor(R.color.on_surface, null))
             }
             else -> {
                 tvStatus.text = "未接続"
+                tvStatus.setTextColor(resources.getColor(R.color.on_surface_variant, null))
                 tvStatusBadge.text = "未接続"
                 tvStatusBadge.setTextColor(resources.getColor(R.color.on_surface_variant, null))
+                btnConnect.background = ContextCompat.getDrawable(requireContext(), R.drawable.bg_connect_button_disconnected)
                 btnConnect.text = "接続"
-                trafficGraph.reset()
+                btnConnect.setTextColor(resources.getColor(R.color.on_surface, null))
             }
         }
     }
 
     private fun updateTotalData() {
-        val total = (viewModel.wifiTotalBytes.value ?: 0L) + (viewModel.simTotalBytes.value ?: 0L)
+        val total = (viewModel.wifiDailyBytes.value ?: 0L) + (viewModel.simDailyBytes.value ?: 0L)
         tvTotalData.text = viewModel.formatBytes(total)
     }
 
@@ -143,7 +182,7 @@ class DashboardFragment : Fragment() {
         }
 
         val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunVpnService.ACTION_CONNECT
+            action = GlorytunConstants.ACTION_CONNECT
             putExtra("IP", ip)
             putExtra("PORT", port)
             putExtra("SECRET", secret)
@@ -154,7 +193,7 @@ class DashboardFragment : Fragment() {
 
     private fun disconnectVpn() {
         val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunVpnService.ACTION_DISCONNECT
+            action = GlorytunConstants.ACTION_DISCONNECT
         }
         requireContext().startService(serviceIntent)
         viewModel.connectionState.value = "Disconnecting..."

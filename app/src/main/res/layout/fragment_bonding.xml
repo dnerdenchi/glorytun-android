@@ -1,221 +1,156 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background">
+    android:background="@color/background"
+    android:padding="24dp"
+    android:clipToPadding="false">
 
-    <ScrollView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:padding="24dp"
-        android:clipToPadding="false">
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="32dp">
 
+        <!-- ヘッダー -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingBottom="80dp">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
 
-            <!-- ヘッダー -->
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="接続プロファイル"
+                android:textColor="@color/on_surface"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_add_profile"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="＋ 追加"
+                android:textSize="13sp"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                app:strokeColor="@color/primary"
+                app:cornerRadius="8dp"
+                android:textColor="@color/primary" />
+
+        </LinearLayout>
+
+        <!-- アクティブ接続カード -->
+        <LinearLayout
+            android:id="@+id/active_profile_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:layout_marginBottom="20dp">
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="20dp">
+                android:layout_marginBottom="8dp">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="接続プロファイル"
-                    android:textColor="@color/on_surface"
-                    android:textSize="22sp"
-                    android:textStyle="bold" />
+                    android:text="アクティブ設定"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.1" />
+
+                <TextView
+                    android:id="@+id/tv_active_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="未接続"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="11sp"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp"
+                    android:background="@drawable/bg_card" />
 
             </LinearLayout>
 
-            <!-- アクティブ接続カード -->
-            <LinearLayout
-                android:id="@+id/active_profile_card"
-                android:layout_width="match_parent"
+            <TextView
+                android:id="@+id/tv_active_profile_name"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="16dp"
-                android:layout_marginBottom="16dp">
+                android:text="プロファイル未選択"
+                android:textColor="@color/on_surface"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="8dp">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="アクティブ設定"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="11sp"
-                        android:letterSpacing="0.1" />
-
-                    <TextView
-                        android:id="@+id/tv_active_badge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="未接続"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="11sp"
-                        android:paddingHorizontal="8dp"
-                        android:paddingVertical="3dp"
-                        android:background="@drawable/bg_card" />
-
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tv_active_profile_name"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="デフォルト"
-                    android:textColor="@color/on_surface"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="4dp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <TextView
-                        android:id="@+id/tv_active_server"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="サーバー: 未設定"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="12sp" />
-
-                    <Button
-                        android:id="@+id/btn_quick_connect"
-                        android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:text="接続"
-                        android:textSize="13sp"
-                        android:backgroundTint="@color/primary"
-                        android:textColor="@color/on_primary"
-                        app:cornerRadius="8dp" />
-
-                </LinearLayout>
-
-            </LinearLayout>
-
-            <!-- サーバー設定フォーム（インライン） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_card"
-                android:padding="16dp"
-                android:layout_marginBottom="16dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
                 <TextView
+                    android:id="@+id/tv_active_server"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="サーバー: 未設定"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_quick_connect"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="接続設定"
-                    android:textColor="@color/on_surface"
+                    android:text="接続"
                     android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/server_ip"
-                    android:layout_marginBottom="12dp"
-                    style="@style/Widget.Material3.TextInputLayout.FilledBox">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/edit_server_ip"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="textUri" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/server_port"
-                    android:layout_marginBottom="12dp"
-                    style="@style/Widget.Material3.TextInputLayout.FilledBox">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/edit_server_port"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="number" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/secret_key"
-                    android:layout_marginBottom="16dp"
-                    app:passwordToggleEnabled="true"
-                    style="@style/Widget.Material3.TextInputLayout.FilledBox">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/edit_secret"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="textPassword" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <!-- セキュリティノート -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:background="@color/surface_container_high"
-                    android:padding="12dp"
-                    android:gravity="top">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🔒"
-                        android:textSize="14sp"
-                        android:layout_marginEnd="8dp" />
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/security_note"
-                        android:textColor="@color/on_surface_variant"
-                        android:textSize="11sp" />
-
-                </LinearLayout>
+                    android:backgroundTint="@color/primary"
+                    android:textColor="@color/on_primary"
+                    app:cornerRadius="8dp" />
 
             </LinearLayout>
 
         </LinearLayout>
-    </ScrollView>
 
-    <!-- FAB: 接続ボタン -->
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/fab_connect"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="24dp"
-        android:text="接続"
-        android:textColor="@color/on_primary"
-        app:icon="@drawable/ic_nav_bonding"
-        app:iconTint="@color/on_primary"
-        app:backgroundTint="@color/primary"
-        android:layout_marginBottom="80dp" />
+        <!-- プロファイル一覧 ラベル -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="保存済みプロファイル"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" />
 
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+        <!-- プロファイル一覧（動的に追加） -->
+        <LinearLayout
+            android:id="@+id/profile_list_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <!-- プロファイルが0件の場合 -->
+        <TextView
+            android:id="@+id/tv_no_profiles"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="プロファイルがありません。\n「＋ 追加」ボタンから追加してください。"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:padding="32dp"
+            android:background="@drawable/bg_card"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</ScrollView>

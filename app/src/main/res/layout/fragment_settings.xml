@@ -43,39 +43,6 @@
 
             </LinearLayout>
 
-            <!-- プロファイルアイコン -->
-            <View
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="@color/surface_container_high" />
-
-        </LinearLayout>
-
-        <!-- セキュリティステータス -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:background="@drawable/bg_status_connected"
-            android:padding="14dp"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:text="🔒"
-                android:textSize="14sp"
-                android:layout_marginEnd="10dp" />
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/settings_security"
-                android:textColor="@color/on_surface"
-                android:textSize="13sp" />
-
         </LinearLayout>
 
         <!-- ネットワークプロトコル管理 -->
@@ -112,6 +79,7 @@
                     android:textSize="14sp" />
 
                 <TextView
+                    android:id="@+id/tv_network_mode_subtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="bonding モード・優先順位"
@@ -162,9 +130,10 @@
                     android:textSize="14sp" />
 
                 <TextView
+                    android:id="@+id/tv_bandwidth_subtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SIM / Wi-Fi 帯域幅の制限"
+                    android:text="制限なし"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 
@@ -175,6 +144,53 @@
                 android:layout_height="20dp"
                 android:src="@drawable/ic_chevron_right"
                 app:tint="@color/on_surface_variant" />
+
+        </LinearLayout>
+
+        <!-- AdGuard DNS フィルタリング -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="@drawable/bg_card"
+            android:padding="16dp"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_nav_settings"
+                app:tint="@color/primary"
+                android:layout_marginEnd="14dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AdGuard DNS フィルタリング"
+                    android:textColor="@color/on_surface"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/tv_adguard_dns_subtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="広告・トラッカーをDNSでブロック"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/switch_adguard_dns"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
 
         </LinearLayout>
 

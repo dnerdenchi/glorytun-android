@@ -20,6 +20,10 @@
     <string name="latency">遅延</string>
     <string name="session_data">セッションデータ</string>
     <string name="settings_network">ネットワークプロトコル管理</string>
+    <string name="mode_bonding">ボンディング高速化</string>
+    <string name="mode_wifi_first">WiFi 優先モード</string>
+    <string name="mode_sim_first">SIM 優先モード</string>
+    <string name="threshold_label">速度しきい値</string>
     <string name="settings_bandwidth">帯域幅管理</string>
     <string name="settings_appearance">外観設定</string>
     <string name="settings_system">システム情報</string>
