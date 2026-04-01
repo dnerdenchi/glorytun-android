@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.fragment.app.Fragment
 import com.google.android.material.switchmaterial.SwitchMaterial
 
@@ -51,6 +52,22 @@ class SettingsFragment : Fragment() {
         // サブタイトル初期反映
         if (switchAdguard.isChecked) {
             view.findViewById<TextView>(R.id.tv_adguard_dns_subtitle)?.text = "有効 (94.140.14.14)"
+        }
+
+        // ダークモード / ライトモード トグル
+        val appearancePref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_APPEARANCE, Context.MODE_PRIVATE)
+        val switchDarkMode = view.findViewById<SwitchMaterial>(R.id.switch_dark_mode)
+        val isDark = appearancePref.getBoolean(GlorytunConstants.KEY_DARK_MODE_ENABLED, true)
+        switchDarkMode.isChecked = isDark
+        view.findViewById<TextView>(R.id.tv_dark_mode_subtitle)?.text =
+            if (isDark) "ダークモード" else "ライトモード"
+        switchDarkMode.setOnCheckedChangeListener { _, isChecked ->
+            appearancePref.edit().putBoolean(GlorytunConstants.KEY_DARK_MODE_ENABLED, isChecked).apply()
+            view.findViewById<TextView>(R.id.tv_dark_mode_subtitle)?.text =
+                if (isChecked) "ダークモード" else "ライトモード"
+            AppCompatDelegate.setDefaultNightMode(
+                if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+            )
         }
     }
 

@@ -1,47 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Stitch デザインシステム: BondVPN カラートークン -->
-    <color name="background">#10141a</color>
-    <color name="surface">#10141a</color>
-    <color name="surface_dim">#10141a</color>
-    <color name="surface_bright">#353940</color>
-    <color name="surface_container_lowest">#0a0e14</color>
-    <color name="surface_container_low">#181c22</color>
-    <color name="surface_container">#1c2026</color>
-    <color name="surface_container_high">#262a31</color>
-    <color name="surface_container_highest">#31353c</color>
-    <color name="surface_variant">#31353c</color>
-    <color name="surface_tint">#adc6ff</color>
+    <!-- ライトモード用カラートークン -->
+    <color name="background">#f5f7ff</color>
+    <color name="surface">#f5f7ff</color>
+    <color name="surface_dim">#dde1f0</color>
+    <color name="surface_bright">#f5f7ff</color>
+    <color name="surface_container_lowest">#ffffff</color>
+    <color name="surface_container_low">#eff1ff</color>
+    <color name="surface_container">#e9ebfa</color>
+    <color name="surface_container_high">#e3e5f4</color>
+    <color name="surface_container_highest">#dde0ee</color>
+    <color name="surface_variant">#dde0ee</color>
+    <color name="surface_tint">#005bc1</color>
 
-    <color name="primary">#adc6ff</color>
-    <color name="primary_container">#4b8eff</color>
-    <color name="on_primary">#002e69</color>
-    <color name="on_primary_container">#00285c</color>
+    <color name="primary">#005bc1</color>
+    <color name="primary_container">#d8e2ff</color>
+    <color name="on_primary">#ffffff</color>
+    <color name="on_primary_container">#001a41</color>
     <color name="primary_fixed">#d8e2ff</color>
     <color name="primary_fixed_dim">#adc6ff</color>
 
-    <color name="secondary">#ffcf8f</color>
-    <color name="secondary_container">#1d2d4a</color>
-    <color name="on_secondary">#452b00</color>
-    <color name="on_secondary_container">#adc6ff</color>
+    <color name="secondary">#7b5800</color>
+    <color name="secondary_container">#ffdea8</color>
+    <color name="on_secondary">#ffffff</color>
+    <color name="on_secondary_container">#271900</color>
 
-    <color name="tertiary">#00daf3</color>
-    <color name="tertiary_container">#009fb2</color>
-    <color name="on_tertiary">#00363d</color>
-    <color name="on_tertiary_container">#002f35</color>
+    <color name="tertiary">#006876</color>
+    <color name="tertiary_container">#9eefff</color>
+    <color name="on_tertiary">#ffffff</color>
+    <color name="on_tertiary_container">#001f24</color>
 
-    <color name="on_surface">#dfe2eb</color>
-    <color name="on_surface_variant">#c1c6d7</color>
-    <color name="on_background">#dfe2eb</color>
+    <color name="on_surface">#1a1c23</color>
+    <color name="on_surface_variant">#44475a</color>
+    <color name="on_background">#1a1c23</color>
 
-    <color name="outline">#8b90a0</color>
-    <color name="outline_variant">#414755</color>
+    <color name="outline">#757891</color>
+    <color name="outline_variant">#c5c6d9</color>
 
-    <color name="error">#ffb4ab</color>
-    <color name="error_container">#93000a</color>
-    <color name="on_error">#690005</color>
+    <color name="error">#ba1a1a</color>
+    <color name="error_container">#ffdad6</color>
+    <color name="on_error">#ffffff</color>
 
-    <color name="inverse_surface">#dfe2eb</color>
-    <color name="inverse_on_surface">#2d3137</color>
-    <color name="inverse_primary">#005bc1</color>
+    <color name="inverse_surface">#2f3038</color>
+    <color name="inverse_on_surface">#f1f0f8</color>
+    <color name="inverse_primary">#adc6ff</color>
+
+    <!-- 帯域幅管理画面用 (WiFi=青, SIM=オレンジ) -->
+    <color name="wifi_color">#2196F3</color>
+    <color name="sim_color">#FF9800</color>
 </resources>

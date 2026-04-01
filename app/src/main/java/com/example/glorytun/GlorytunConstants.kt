@@ -65,4 +65,8 @@ object GlorytunConstants {
     // --- DNS Prefs ---
     const val PREFS_DNS = "dns_prefs"
     const val KEY_ADGUARD_DNS_ENABLED = "adguard_dns_enabled"
+
+    // --- Appearance Prefs ---
+    const val PREFS_APPEARANCE = "appearance_prefs"
+    const val KEY_DARK_MODE_ENABLED = "dark_mode_enabled"
 }

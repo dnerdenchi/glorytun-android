@@ -86,7 +86,7 @@
                 <View
                     android:layout_width="12dp"
                     android:layout_height="12dp"
-                    android:background="#2196F3"
+                    android:background="@color/wifi_color"
                     android:layout_marginEnd="10dp" />
 
                 <TextView
@@ -152,13 +152,13 @@
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="12dp" />
 
-                <!-- データ上限 -->
+                <!-- 月間データ上限 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -173,52 +173,78 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="30 GB"
-                        android:textColor="#2196F3"
+                        android:textColor="@color/wifi_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- WiFi月間上限 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_wifi_monthly_limit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- WiFi月間上限 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_wifi_monthly_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="199"
-                    android:progress="29"
-                    android:progressTint="#2196F3"
-                    android:thumbTint="#2196F3"
+                    android:progressTint="@color/wifi_color"
+                    android:thumbTint="@color/wifi_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- WiFi月間上限 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_wifi_monthly_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginBottom="14dp">
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="8dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_wifi_monthly_limit"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="200 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="GB"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
-                <!-- 超過後の速度 -->
+                <!-- 超過後速度 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -233,41 +259,67 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 Mbps"
-                        android:textColor="#2196F3"
+                        android:textColor="@color/wifi_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- WiFi月間速度 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_wifi_monthly_throttle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- WiFi月間速度 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_wifi_monthly_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="0"
-                    android:progressTint="#2196F3"
-                    android:thumbTint="#2196F3"
+                    android:progressTint="@color/wifi_color"
+                    android:thumbTint="@color/wifi_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- WiFi月間速度 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_wifi_monthly_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_wifi_monthly_throttle"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="100 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="kbps / Mbps"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
@@ -334,13 +386,13 @@
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="12dp" />
 
-                <!-- データ上限 -->
+                <!-- 1日データ上限 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -355,52 +407,78 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 GB"
-                        android:textColor="#2196F3"
+                        android:textColor="@color/wifi_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- WiFi1日上限 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_wifi_daily_limit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- WiFi1日上限 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_wifi_daily_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="9"
-                    android:progressTint="#2196F3"
-                    android:thumbTint="#2196F3"
+                    android:progressTint="@color/wifi_color"
+                    android:thumbTint="@color/wifi_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- WiFi1日上限 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_wifi_daily_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginBottom="14dp">
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="8dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_wifi_daily_limit"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="100 MB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="10 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="MB / GB"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
-                <!-- 超過後の速度 -->
+                <!-- 超過後速度 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -415,41 +493,67 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 Mbps"
-                        android:textColor="#2196F3"
+                        android:textColor="@color/wifi_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- WiFi1日速度 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_wifi_daily_throttle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- WiFi1日速度 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_wifi_daily_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="0"
-                    android:progressTint="#2196F3"
-                    android:thumbTint="#2196F3"
+                    android:progressTint="@color/wifi_color"
+                    android:thumbTint="@color/wifi_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- WiFi1日速度 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_wifi_daily_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_wifi_daily_throttle"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="100 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="kbps / Mbps"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
@@ -487,7 +591,7 @@
                 <View
                     android:layout_width="12dp"
                     android:layout_height="12dp"
-                    android:background="#FF9800"
+                    android:background="@color/sim_color"
                     android:layout_marginEnd="10dp" />
 
                 <TextView
@@ -553,13 +657,13 @@
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="12dp" />
 
-                <!-- データ上限 -->
+                <!-- 月間データ上限 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -574,52 +678,78 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="30 GB"
-                        android:textColor="#FF9800"
+                        android:textColor="@color/sim_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- SIM月間上限 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_sim_monthly_limit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- SIM月間上限 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_sim_monthly_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="199"
-                    android:progress="29"
-                    android:progressTint="#FF9800"
-                    android:thumbTint="#FF9800"
+                    android:progressTint="@color/sim_color"
+                    android:thumbTint="@color/sim_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- SIM月間上限 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_sim_monthly_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginBottom="14dp">
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="8dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_sim_monthly_limit"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="200 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="GB"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
-                <!-- 超過後の速度 -->
+                <!-- 超過後速度 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -634,41 +764,67 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 Mbps"
-                        android:textColor="#FF9800"
+                        android:textColor="@color/sim_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- SIM月間速度 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_sim_monthly_throttle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- SIM月間速度 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_sim_monthly_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="0"
-                    android:progressTint="#FF9800"
-                    android:thumbTint="#FF9800"
+                    android:progressTint="@color/sim_color"
+                    android:thumbTint="@color/sim_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- SIM月間速度 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_sim_monthly_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_sim_monthly_throttle"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="100 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="kbps / Mbps"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
@@ -735,13 +891,13 @@
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="12dp" />
 
-                <!-- データ上限 -->
+                <!-- 1日データ上限 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -756,52 +912,78 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 GB"
-                        android:textColor="#FF9800"
+                        android:textColor="@color/sim_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- SIM1日上限 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_sim_daily_limit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- SIM1日上限 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_sim_daily_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="9"
-                    android:progressTint="#FF9800"
-                    android:thumbTint="#FF9800"
+                    android:progressTint="@color/sim_color"
+                    android:thumbTint="@color/sim_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- SIM1日上限 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_sim_daily_limit"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginBottom="14dp">
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="8dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_sim_daily_limit"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="100 MB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="10 GB"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="MB / GB"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 
-                <!-- 超過後の速度 -->
+                <!-- 超過後速度 ラベル行 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -816,41 +998,67 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="1 Mbps"
-                        android:textColor="#FF9800"
+                        android:textColor="@color/sim_color"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
                 </LinearLayout>
 
+                <!-- SIM1日速度 プリセットチップ -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="8dp">
+                    <LinearLayout
+                        android:id="@+id/chips_sim_daily_throttle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical" />
+                </HorizontalScrollView>
+
+                <!-- SIM1日速度 スライダー -->
                 <SeekBar
                     android:id="@+id/seekbar_sim_daily_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="99"
-                    android:progress="0"
-                    android:progressTint="#FF9800"
-                    android:thumbTint="#FF9800"
+                    android:progressTint="@color/sim_color"
+                    android:thumbTint="@color/sim_color"
                     android:layout_marginBottom="2dp" />
 
+                <!-- SIM1日速度 カスタム入力 -->
                 <LinearLayout
+                    android:id="@+id/custom_sim_daily_throttle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    android:layout_marginTop="6dp">
 
-                    <TextView
+                    <EditText
+                        android:id="@+id/et_sim_daily_throttle"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
-                        android:text="1 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:background="@drawable/bg_chip_unselected"
+                        android:inputType="numberDecimal"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:hint="値を入力"
+                        android:textColorHint="@color/outline"
+                        android:singleLine="true" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="100 Mbps"
-                        android:textColor="@color/outline"
-                        android:textSize="11sp" />
+                        android:text="kbps / Mbps"
+                        android:textColor="@color/on_surface_variant"
+                        android:textSize="13sp"
+                        android:layout_marginStart="8dp" />
 
                 </LinearLayout>
 

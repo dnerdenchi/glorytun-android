@@ -2,7 +2,6 @@ package com.example.glorytun
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
@@ -35,7 +34,7 @@ class TrafficGraphView @JvmOverloads constructor(
     private val simRates  = ArrayDeque<Float>()
 
     private val wifiLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color       = Color.parseColor("#2196F3")
+        color       = context.getColor(R.color.wifi_color)
         strokeWidth = 4f
         style       = Paint.Style.STROKE
         strokeJoin  = Paint.Join.ROUND
@@ -43,7 +42,7 @@ class TrafficGraphView @JvmOverloads constructor(
     }
 
     private val simLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color       = Color.parseColor("#FF9800")
+        color       = context.getColor(R.color.sim_color)
         strokeWidth = 4f
         style       = Paint.Style.STROKE
         strokeJoin  = Paint.Join.ROUND
@@ -51,44 +50,44 @@ class TrafficGraphView @JvmOverloads constructor(
     }
 
     private val wifiBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2196F3")
+        color = context.getColor(R.color.wifi_color)
         style = Paint.Style.FILL
     }
 
     private val simBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF9800")
+        color = context.getColor(R.color.sim_color)
         style = Paint.Style.FILL
     }
 
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color       = Color.parseColor("#414755")
+        color       = context.getColor(R.color.outline_variant)
         strokeWidth = 1f
         style       = Paint.Style.STROKE
     }
 
     private val baselinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color       = Color.parseColor("#8b90a0")
+        color       = context.getColor(R.color.outline)
         strokeWidth = 1.5f
         style       = Paint.Style.STROKE
     }
 
     private val bgPaint = Paint().apply {
-        color = Color.parseColor("#1c2026")
+        color = context.getColor(R.color.surface_container)
     }
 
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color    = Color.parseColor("#8b90a0")
+        color    = context.getColor(R.color.on_surface_variant)
         textSize = 26f
     }
 
     private val xLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color    = Color.parseColor("#8b90a0")
+        color    = context.getColor(R.color.on_surface_variant)
         textSize = 22f
         textAlign = Paint.Align.CENTER
     }
 
     private val noDataPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color     = Color.parseColor("#8b90a0")
+        color     = context.getColor(R.color.on_surface_variant)
         textSize  = 32f
         textAlign = Paint.Align.CENTER
     }

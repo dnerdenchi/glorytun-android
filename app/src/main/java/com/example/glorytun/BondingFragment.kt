@@ -330,7 +330,7 @@ class BondingFragment : Fragment() {
         val title = if (existingProfile == null) "プロファイルを追加" else "プロファイルを編集"
         val positiveText = if (existingProfile == null) "追加" else "更新"
 
-        AlertDialog.Builder(requireContext())
+        val builder = AlertDialog.Builder(requireContext())
             .setTitle(title)
             .setView(dialogView)
             .setPositiveButton(positiveText) { _, _ ->
@@ -360,7 +360,14 @@ class BondingFragment : Fragment() {
                 profileRepo.saveProfiles(profiles)
                 refreshProfileList()
             }
-            .setNegativeButton("キャンセル", null)
+
+        if (existingProfile != null) {
+            builder.setNeutralButton("削除") { _, _ ->
+                showDeleteConfirmDialog(existingProfile)
+            }
+        }
+
+        builder.setNegativeButton("キャンセル", null)
             .show()
     }
 
