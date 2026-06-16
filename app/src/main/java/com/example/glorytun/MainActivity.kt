@@ -11,14 +11,17 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.example.glorytun.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: VpnViewModel by viewModels()
+    private val appUpdateManager by lazy { AppUpdateManager(applicationContext) }
 
     private val prefs by lazy {
         val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
@@ -174,6 +177,26 @@ class MainActivity : AppCompatActivity() {
         startService(Intent(this, AdGuardProxyService::class.java).apply {
             action = GlorytunConstants.ACTION_PROXY_QUERY_STATE
         })
+
+        if (savedInstanceState == null) {
+            checkForAppUpdateAutomatically()
+        }
+    }
+
+    private fun checkForAppUpdateAutomatically() {
+        if (!appUpdateManager.shouldRunAutomaticCheck()) return
+
+        appUpdateManager.markAutomaticCheckStarted()
+        lifecycleScope.launch {
+            val result = appUpdateManager.checkForUpdate()
+            if (result is UpdateCheckResult.UpdateAvailable && !isFinishing && !isDestroyed) {
+                appUpdateManager.showUpdateDialog(
+                    this@MainActivity,
+                    result.updateInfo,
+                    lifecycleScope
+                )
+            }
+        }
     }
 
     private fun showFragment(fragment: Fragment, tag: String) {

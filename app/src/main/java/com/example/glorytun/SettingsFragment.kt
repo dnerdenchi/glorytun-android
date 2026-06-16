@@ -7,9 +7,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
+import kotlinx.coroutines.launch
 
 class SettingsFragment : Fragment() {
 
@@ -39,6 +43,7 @@ class SettingsFragment : Fragment() {
         }
 
         updateBandwidthSubtitle(view)
+        setupUpdateControls(view)
 
         val proxyPref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
         val switchProxy = view.findViewById<SwitchMaterial>(R.id.switch_adguard_proxy)
@@ -71,6 +76,40 @@ class SettingsFragment : Fragment() {
             AppCompatDelegate.setDefaultNightMode(
                 if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
             )
+        }
+    }
+
+    private fun setupUpdateControls(view: View) {
+        val updateManager = AppUpdateManager(requireContext().applicationContext)
+        val statusText = view.findViewById<TextView>(R.id.tv_update_status)
+        val checkButton = view.findViewById<MaterialButton>(R.id.btn_check_update)
+
+        view.findViewById<TextView>(R.id.tv_app_version)?.text = BuildConfig.VERSION_NAME
+
+        checkButton?.setOnClickListener {
+            val activity = activity as? AppCompatActivity ?: return@setOnClickListener
+            checkButton.isEnabled = false
+            statusText?.text = "アップデートを確認しています..."
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                when (val result = updateManager.checkForUpdate()) {
+                    is UpdateCheckResult.UpdateAvailable -> {
+                        statusText?.text = "バージョン ${result.updateInfo.versionName} が利用できます"
+                        updateManager.showUpdateDialog(
+                            activity,
+                            result.updateInfo,
+                            viewLifecycleOwner.lifecycleScope
+                        )
+                    }
+                    UpdateCheckResult.NoUpdate -> {
+                        statusText?.text = "現在のバージョン ${BuildConfig.VERSION_NAME} が最新版です"
+                    }
+                    is UpdateCheckResult.Error -> {
+                        statusText?.text = result.message
+                    }
+                }
+                checkButton.isEnabled = true
+            }
         }
     }
 
