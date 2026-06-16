@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -358,12 +359,17 @@ class GlorytunVpnService : VpnService() {
             val port = intent.getStringExtra("PORT") ?: ""
             val secret = intent.getStringExtra("SECRET") ?: ""
             connectVpn(serverIp, port, secret)
-        } else if (action == GlorytunConstants.ACTION_DISCONNECT) {
-            disconnectVpn()
-        } else if (action == GlorytunConstants.ACTION_QUERY_STATE) {
-            sendVpnState(if (isConnected) "Connected" else "Disconnected")
+            return START_STICKY
         }
-        return START_NOT_STICKY
+        if (action == GlorytunConstants.ACTION_DISCONNECT) {
+            disconnectVpn()
+            return START_NOT_STICKY
+        }
+        if (action == GlorytunConstants.ACTION_QUERY_STATE) {
+            sendVpnState(if (isConnected) "Connected" else "Disconnected")
+            if (!isConnected) stopSelf(startId)
+        }
+        return if (isConnected) START_STICKY else START_NOT_STICKY
     }
 
     private fun createNotificationChannel() {
@@ -375,22 +381,33 @@ class GlorytunVpnService : VpnService() {
         }
     }
 
-    private fun startForegroundNotification() {
+    private fun startForegroundNotification(contentText: String = "VPN接続中 - バックグラウンドで実行中") {
         val pendingIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(this, GlorytunConstants.CHANNEL_ID)
-            .setContentTitle("Glorytun VPN")
-            .setContentText("VPN接続中 (マルチパス)")
+            .setContentTitle("BondVPN")
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        startForeground(GlorytunConstants.NOTIFICATION_ID, notification)
+        ServiceCompat.startForeground(
+            this,
+            GlorytunConstants.NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        )
     }
 
     private fun connectVpn(serverIp: String, port: String, secret: String) {
         if (isConnected) return
+
+        startForegroundNotification("VPN接続を準備中 - バックグラウンドで実行中")
 
         Thread {
             try {
@@ -399,15 +416,8 @@ class GlorytunVpnService : VpnService() {
                 builder.addAddress(GlorytunConstants.DEFAULT_VPN_LOCAL_IP, 24)
                 builder.addRoute("0.0.0.0", 0)
                 builder.addRoute("::", 0)
-                val adguardEnabled = getSharedPreferences(GlorytunConstants.PREFS_DNS, Context.MODE_PRIVATE)
-                    .getBoolean(GlorytunConstants.KEY_ADGUARD_DNS_ENABLED, false)
-                if (adguardEnabled) {
-                    builder.addDnsServer(GlorytunConstants.ADGUARD_DNS_PRIMARY)
-                    builder.addDnsServer(GlorytunConstants.ADGUARD_DNS_SECONDARY)
-                } else {
-                    builder.addDnsServer(GlorytunConstants.DEFAULT_DNS_PRIMARY)
-                    builder.addDnsServer(GlorytunConstants.DEFAULT_DNS_SECONDARY)
-                }
+                builder.addDnsServer(GlorytunConstants.DEFAULT_DNS_PRIMARY)
+                builder.addDnsServer(GlorytunConstants.DEFAULT_DNS_SECONDARY)
                 builder.setMtu(GlorytunConstants.DEFAULT_MTU)
 
                 vpnInterface = builder.establish()
@@ -420,9 +430,16 @@ class GlorytunVpnService : VpnService() {
                     val keyfilePath = File(cacheDir, "keyfile.txt").absolutePath
                     startGlorytunNative(vpnInterface!!.fd, serverIp, port, secret, keyfilePath)
                     waitForGlorytunReady()
+                } else {
+                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    sendVpnState("Disconnected")
+                    stopSelf()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "VPN Setup failed", e)
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                sendVpnState("Disconnected")
+                stopSelf()
             }
         }.start()
     }

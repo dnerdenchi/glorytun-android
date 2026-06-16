@@ -194,53 +194,6 @@
 
         </LinearLayout>
 
-        <!-- AdGuard DNS フィルタリング -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="12dp">
-
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_nav_settings"
-                app:tint="@color/primary"
-                android:layout_marginEnd="14dp" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="AdGuard DNS フィルタリング"
-                    android:textColor="@color/on_surface"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/tv_adguard_dns_subtitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="広告・トラッカーをDNSでブロック"
-                    android:textColor="@color/on_surface_variant"
-                    android:textSize="12sp" />
-
-            </LinearLayout>
-
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/switch_adguard_dns"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-
-        </LinearLayout>
-
         <!-- 外観設定 -->
         <LinearLayout
             android:layout_width="match_parent"

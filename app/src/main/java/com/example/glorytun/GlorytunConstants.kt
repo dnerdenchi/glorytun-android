@@ -61,13 +61,9 @@ object GlorytunConstants {
     const val DEFAULT_VPN_LOCAL_IP = "10.0.1.2"
     const val DEFAULT_DNS_PRIMARY = "8.8.8.8"
     const val DEFAULT_DNS_SECONDARY = "1.1.1.1"
-    const val ADGUARD_DNS_PRIMARY = "94.140.14.14"
-    const val ADGUARD_DNS_SECONDARY = "94.140.15.15"
     const val DEFAULT_MTU = 1420
 
-    // --- DNS Prefs ---
-    const val PREFS_DNS = "dns_prefs"
-    const val KEY_ADGUARD_DNS_ENABLED = "adguard_dns_enabled"
+    // --- Proxy Prefs ---
     const val PREFS_PROXY = "proxy_prefs"
     const val KEY_ADGUARD_PROXY_MODE_ENABLED = "adguard_proxy_mode_enabled"
     const val KEY_ADGUARD_PROXY_PORT = "adguard_proxy_port"

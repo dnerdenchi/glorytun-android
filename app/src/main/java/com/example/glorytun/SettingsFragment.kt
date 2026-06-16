@@ -57,20 +57,6 @@ class SettingsFragment : Fragment() {
                 else "AdGuard 側で BondVPN を除外し 127.0.0.1:$proxyPort を設定"
         }
 
-        // AdGuard DNS トグル
-        val dnsPref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_DNS, Context.MODE_PRIVATE)
-        val switchAdguard = view.findViewById<SwitchMaterial>(R.id.switch_adguard_dns)
-        switchAdguard.isChecked = dnsPref.getBoolean(GlorytunConstants.KEY_ADGUARD_DNS_ENABLED, false)
-        switchAdguard.setOnCheckedChangeListener { _, isChecked ->
-            dnsPref.edit().putBoolean(GlorytunConstants.KEY_ADGUARD_DNS_ENABLED, isChecked).apply()
-            view.findViewById<TextView>(R.id.tv_adguard_dns_subtitle)?.text =
-                if (isChecked) "有効 (94.140.14.14)" else "広告・トラッカーをDNSでブロック"
-        }
-        // サブタイトル初期反映
-        if (switchAdguard.isChecked) {
-            view.findViewById<TextView>(R.id.tv_adguard_dns_subtitle)?.text = "有効 (94.140.14.14)"
-        }
-
         // ダークモード / ライトモード トグル
         val appearancePref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_APPEARANCE, Context.MODE_PRIVATE)
         val switchDarkMode = view.findViewById<SwitchMaterial>(R.id.switch_dark_mode)

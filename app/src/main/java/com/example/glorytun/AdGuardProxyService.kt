@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -104,13 +105,19 @@ class AdGuardProxyService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            GlorytunConstants.ACTION_PROXY_START -> startProxy()
-            GlorytunConstants.ACTION_PROXY_STOP -> stopProxy()
+            GlorytunConstants.ACTION_PROXY_START -> {
+                startProxy()
+                return START_STICKY
+            }
+            GlorytunConstants.ACTION_PROXY_STOP -> {
+                stopProxy()
+                return START_NOT_STICKY
+            }
             GlorytunConstants.ACTION_PROXY_QUERY_STATE -> {
-                if (isRunning.get()) sendProxyState() else stopSelf()
+                if (isRunning.get()) sendProxyState() else stopSelf(startId)
             }
         }
-        return START_NOT_STICKY
+        return if (isRunning.get()) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -436,12 +443,21 @@ class AdGuardProxyService : VpnService() {
         )
         val notification = NotificationCompat.Builder(this, GlorytunConstants.CHANNEL_ID)
             .setContentTitle("BondVPN Proxy")
-            .setContentText("$LOOPBACK_HOST:$port で待受中")
+            .setContentText("$LOOPBACK_HOST:$port で待受中 - バックグラウンドで実行中")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        startForeground(GlorytunConstants.NOTIFICATION_ID + 1, notification)
+        ServiceCompat.startForeground(
+            this,
+            GlorytunConstants.NOTIFICATION_ID + 1,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
     }
 
     private fun sendProxyState() {
