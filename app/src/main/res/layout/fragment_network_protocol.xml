@@ -270,35 +270,59 @@
                 android:textSize="12sp"
                 android:layout_marginBottom="16dp" />
 
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="none"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:id="@+id/chips_threshold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical" />
+            </HorizontalScrollView>
+
             <SeekBar
                 android:id="@+id/seekbar_threshold"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:max="99"
-                android:progress="39"
                 android:progressTint="@color/primary"
-                android:thumbTint="@color/primary" />
+                android:thumbTint="@color/primary"
+                android:layout_marginBottom="2dp" />
 
             <LinearLayout
+                android:id="@+id/custom_threshold"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone"
                 android:layout_marginTop="6dp">
 
-                <TextView
+                <EditText
+                    android:id="@+id/et_threshold"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="36dp"
                     android:layout_weight="1"
-                    android:text="1 Mbps"
-                    android:textColor="@color/on_surface_variant"
-                    android:textSize="11sp" />
+                    android:background="@drawable/bg_chip_unselected"
+                    android:inputType="numberDecimal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:textColor="@color/on_surface"
+                    android:textSize="13sp"
+                    android:hint="値を入力"
+                    android:textColorHint="@color/outline"
+                    android:singleLine="true" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="100 Mbps"
+                    android:text="kbps / Mbps"
                     android:textColor="@color/on_surface_variant"
-                    android:textSize="11sp" />
+                    android:textSize="13sp"
+                    android:layout_marginStart="8dp" />
 
             </LinearLayout>
 

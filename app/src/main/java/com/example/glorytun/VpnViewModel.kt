@@ -162,6 +162,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         realtimeUpdated.postValue(0L)
     }
 
+    fun resetTrafficBaselines(clearSessionHistory: Boolean = false) {
+        prevWifiTx = 0L
+        prevWifiRx = 0L
+        prevSimTx = 0L
+        prevSimRx = 0L
+        wifiKBs.value = 0f
+        simKBs.value = 0f
+        if (clearSessionHistory) {
+            trafficHistory.clear()
+            resetRealtimeData()
+        }
+    }
+
     /** VPN接続中にブロードキャストから受け取った当日通信量・制限状態を更新する */
     fun updateDailyTraffic(wifiKB: Double, simKB: Double, wThrottled: Boolean, sThrottled: Boolean) {
         wifiDailyBytes.value = (wifiKB * 1024).toLong()
@@ -171,10 +184,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun reset() {
-        prevWifiTx = 0L; prevWifiRx = 0L
-        prevSimTx = 0L; prevSimRx = 0L
-        wifiKBs.value = 0f
-        simKBs.value = 0f
+        resetTrafficBaselines(clearSessionHistory = true)
         wifiThrottled.value = false
         simThrottled.value  = false
     }

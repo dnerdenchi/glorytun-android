@@ -48,13 +48,13 @@ class SettingsFragment : Fragment() {
         )
         switchProxy.isChecked = proxyPref.getBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, false)
         view.findViewById<TextView>(R.id.tv_adguard_proxy_subtitle)?.text =
-            if (switchProxy.isChecked) "有効: 127.0.0.1:$proxyPort を AdGuard に設定"
-            else "127.0.0.1:$proxyPort を AdGuard の outbound proxy に設定"
+            if (switchProxy.isChecked) "有効: AdGuard 側で BondVPN を除外し 127.0.0.1:$proxyPort を設定"
+            else "AdGuard 側で BondVPN を除外し 127.0.0.1:$proxyPort を設定"
         switchProxy.setOnCheckedChangeListener { _, isChecked ->
             proxyPref.edit().putBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, isChecked).apply()
             view.findViewById<TextView>(R.id.tv_adguard_proxy_subtitle)?.text =
-                if (isChecked) "有効: 127.0.0.1:$proxyPort を AdGuard に設定"
-                else "127.0.0.1:$proxyPort を AdGuard の outbound proxy に設定"
+                if (isChecked) "有効: AdGuard 側で BondVPN を除外し 127.0.0.1:$proxyPort を設定"
+                else "AdGuard 側で BondVPN を除外し 127.0.0.1:$proxyPort を設定"
         }
 
         // AdGuard DNS トグル

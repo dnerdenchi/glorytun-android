@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private var lastStatsSource: String? = null
 
     // 未接続時もリアルタイムグラフにゼロ点を追加し続けるRunnable
     private val zeroDataRunnable = object : Runnable {
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
             intent?.getStringExtra("state")?.let { state ->
                 viewModel.connectionState.value = state
                 if (state == "Disconnected") {
+                    lastStatsSource = null
                     viewModel.reset()
                 }
             }
@@ -56,6 +58,12 @@ class MainActivity : AppCompatActivity() {
     private val trafficReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
+            val source = intent.getStringExtra("stats_source") ?: "vpn"
+            if (!isStatsSourceActive(source)) return
+            if (lastStatsSource != source) {
+                lastStatsSource = source
+                viewModel.resetTrafficBaselines(clearSessionHistory = true)
+            }
             viewModel.updateTraffic(
                 wifiActive = intent.getBooleanExtra("wifi_active", false),
                 simActive  = intent.getBooleanExtra("sim_active",  false),
@@ -73,6 +81,14 @@ class MainActivity : AppCompatActivity() {
                     sThrottled  = intent.getBooleanExtra("sim_throttled",  false)
                 )
             }
+        }
+    }
+
+    private fun isStatsSourceActive(source: String): Boolean {
+        return when (viewModel.connectionState.value) {
+            "ProxyConnected", "ProxyConnecting" -> source == "proxy"
+            "Connected", "Connecting..." -> source == "vpn"
+            else -> false
         }
     }
 

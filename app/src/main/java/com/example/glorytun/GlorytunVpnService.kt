@@ -73,10 +73,16 @@ class GlorytunVpnService : VpnService() {
             ?: NetworkProtocolFragment.MODE_BONDING
 
     /** しきい値を bytes/s で返す */
-    private fun currentThresholdBytesPerSec(): Long =
-        getSharedPreferences(NetworkProtocolFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            .getInt(NetworkProtocolFragment.KEY_THRESHOLD_MBPS, NetworkProtocolFragment.DEFAULT_THRESHOLD_MBPS)
-            .toLong() * GlorytunConstants.MBPS_TO_BYTES_PER_SEC
+    private fun currentThresholdBytesPerSec(): Long {
+        val prefs = getSharedPreferences(NetworkProtocolFragment.PREFS_NAME, Context.MODE_PRIVATE)
+        val oldMBps = prefs.getInt("speed_threshold_mbps", -1)
+        val kbps = if (oldMBps != -1 && !prefs.contains(NetworkProtocolFragment.KEY_THRESHOLD_KBPS)) {
+            oldMBps * 1000
+        } else {
+            prefs.getInt(NetworkProtocolFragment.KEY_THRESHOLD_KBPS, NetworkProtocolFragment.DEFAULT_THRESHOLD_KBPS)
+        }
+        return kbps.toLong() * GlorytunConstants.KBPS_TO_BYTES_PER_SEC
+    }
 
     /** NetworkCapabilities から推定帯域幅を bytes/s に変換して保存する */
     private fun updateBandwidthFromCaps(network: Network, isWifi: Boolean) {

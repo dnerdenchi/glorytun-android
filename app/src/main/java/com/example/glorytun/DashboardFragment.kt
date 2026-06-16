@@ -203,6 +203,10 @@ class DashboardFragment : Fragment() {
             return
         }
 
+        requireContext().startService(Intent(requireContext(), AdGuardProxyService::class.java).apply {
+            action = GlorytunConstants.ACTION_PROXY_STOP
+        })
+
         val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
             action = GlorytunConstants.ACTION_CONNECT
             putExtra("IP", ip)
@@ -214,6 +218,10 @@ class DashboardFragment : Fragment() {
     }
 
     private fun startProxyConnection() {
+        requireContext().startService(Intent(requireContext(), GlorytunVpnService::class.java).apply {
+            action = GlorytunConstants.ACTION_DISCONNECT
+        })
+
         val serviceIntent = Intent(requireContext(), AdGuardProxyService::class.java).apply {
             action = GlorytunConstants.ACTION_PROXY_START
         }

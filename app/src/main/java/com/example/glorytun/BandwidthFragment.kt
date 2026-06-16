@@ -410,7 +410,7 @@ class BandwidthFragment : Fragment() {
             val chip = chips.getChildAt(i) as? TextView ?: continue
             if (i == selectedIdx) {
                 chip.background = requireContext().getDrawable(R.drawable.bg_chip_selected)
-                chip.setTextColor(accentColor)
+                chip.setTextColor(requireContext().getColor(R.color.on_surface))
             } else {
                 chip.background = requireContext().getDrawable(R.drawable.bg_chip_unselected)
                 chip.setTextColor(requireContext().getColor(R.color.on_surface))

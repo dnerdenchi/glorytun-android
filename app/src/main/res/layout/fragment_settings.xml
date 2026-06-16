@@ -181,7 +181,7 @@
                     android:id="@+id/tv_adguard_proxy_subtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="127.0.0.1:1080 を AdGuard の outbound proxy に設定"
+                    android:text="AdGuard 側で BondVPN を除外し、127.0.0.1:1080 を設定"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 

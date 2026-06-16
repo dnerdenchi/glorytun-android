@@ -3,13 +3,13 @@ package com.example.glorytun
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-class AdGuardProxyService : Service() {
+class AdGuardProxyService : VpnService() {
 
     private data class SelectedNetwork(
         val network: Network,
@@ -281,12 +281,37 @@ class AdGuardProxyService : Service() {
     }
 
     private fun connectOutbound(selection: SelectedNetwork, host: String, port: Int): Socket {
-        val socket = selection.network.socketFactory.createSocket() as Socket
+        return try {
+            val socket = createProtectedSocket()
+            selection.network.bindSocket(socket)
+            socket.tcpNoDelay = true
+            socket.soTimeout = SOCKET_TIMEOUT_MS
+
+            val address = resolveHost(selection.network, host)
+            socket.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
+            socket
+        } catch (e: IOException) {
+            Log.w(TAG, "Network-bound connect failed; falling back to default socket: ${e.message}")
+            connectDefaultOutbound(host, port)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Network-bound socket failed; falling back to default socket: ${e.message}")
+            connectDefaultOutbound(host, port)
+        }
+    }
+
+    private fun connectDefaultOutbound(host: String, port: Int): Socket {
+        val socket = createProtectedSocket()
         socket.tcpNoDelay = true
         socket.soTimeout = SOCKET_TIMEOUT_MS
+        socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+        return socket
+    }
 
-        val address = resolveHost(selection.network, host)
-        socket.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
+    private fun createProtectedSocket(): Socket {
+        val socket = Socket()
+        if (!protect(socket)) {
+            Log.w(TAG, "VpnService.protect() returned false for outbound socket")
+        }
         return socket
     }
 
@@ -439,6 +464,7 @@ class AdGuardProxyService : Service() {
             putExtra("sim_tx_bytes", simTxBytes.get())
             putExtra("sim_rx_bytes", simRxBytes.get())
             putExtra("sim_active", simNetwork.get() != null)
+            putExtra("stats_source", "proxy")
             putExtra("daily_wifi_kb", (wifiTxBytes.get() + wifiRxBytes.get()) / 1024.0)
             putExtra("daily_sim_kb", (simTxBytes.get() + simRxBytes.get()) / 1024.0)
             putExtra("wifi_throttled", false)
