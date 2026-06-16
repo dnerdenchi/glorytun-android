@@ -40,6 +40,23 @@ class SettingsFragment : Fragment() {
 
         updateBandwidthSubtitle(view)
 
+        val proxyPref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
+        val switchProxy = view.findViewById<SwitchMaterial>(R.id.switch_adguard_proxy)
+        val proxyPort = proxyPref.getInt(
+            GlorytunConstants.KEY_ADGUARD_PROXY_PORT,
+            GlorytunConstants.DEFAULT_ADGUARD_PROXY_PORT
+        )
+        switchProxy.isChecked = proxyPref.getBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, false)
+        view.findViewById<TextView>(R.id.tv_adguard_proxy_subtitle)?.text =
+            if (switchProxy.isChecked) "有効: 127.0.0.1:$proxyPort を AdGuard に設定"
+            else "127.0.0.1:$proxyPort を AdGuard の outbound proxy に設定"
+        switchProxy.setOnCheckedChangeListener { _, isChecked ->
+            proxyPref.edit().putBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, isChecked).apply()
+            view.findViewById<TextView>(R.id.tv_adguard_proxy_subtitle)?.text =
+                if (isChecked) "有効: 127.0.0.1:$proxyPort を AdGuard に設定"
+                else "127.0.0.1:$proxyPort を AdGuard の outbound proxy に設定"
+        }
+
         // AdGuard DNS トグル
         val dnsPref = requireContext().getSharedPreferences(GlorytunConstants.PREFS_DNS, Context.MODE_PRIVATE)
         val switchAdguard = view.findViewById<SwitchMaterial>(R.id.switch_adguard_dns)

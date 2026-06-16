@@ -5,6 +5,9 @@ object GlorytunConstants {
     const val ACTION_CONNECT = "com.example.glorytun.START"
     const val ACTION_DISCONNECT = "com.example.glorytun.STOP"
     const val ACTION_QUERY_STATE = "com.example.glorytun.QUERY_STATE"
+    const val ACTION_PROXY_START = "com.example.glorytun.PROXY_START"
+    const val ACTION_PROXY_STOP = "com.example.glorytun.PROXY_STOP"
+    const val ACTION_PROXY_QUERY_STATE = "com.example.glorytun.PROXY_QUERY_STATE"
     const val ACTION_VPN_STATE = "VPN_STATE"
     const val ACTION_VPN_TRAFFIC_STATS = "VPN_TRAFFIC_STATS"
     const val ACTION_VPN_HOURLY_STATS = "VPN_HOURLY_STATS"
@@ -65,6 +68,10 @@ object GlorytunConstants {
     // --- DNS Prefs ---
     const val PREFS_DNS = "dns_prefs"
     const val KEY_ADGUARD_DNS_ENABLED = "adguard_dns_enabled"
+    const val PREFS_PROXY = "proxy_prefs"
+    const val KEY_ADGUARD_PROXY_MODE_ENABLED = "adguard_proxy_mode_enabled"
+    const val KEY_ADGUARD_PROXY_PORT = "adguard_proxy_port"
+    const val DEFAULT_ADGUARD_PROXY_PORT = 1080
 
     // --- Appearance Prefs ---
     const val PREFS_APPEARANCE = "appearance_prefs"

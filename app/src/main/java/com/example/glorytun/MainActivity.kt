@@ -155,6 +155,9 @@ class MainActivity : AppCompatActivity() {
         startService(Intent(this, GlorytunVpnService::class.java).apply {
             action = GlorytunConstants.ACTION_QUERY_STATE
         })
+        startService(Intent(this, AdGuardProxyService::class.java).apply {
+            action = GlorytunConstants.ACTION_PROXY_QUERY_STATE
+        })
     }
 
     private fun showFragment(fragment: Fragment, tag: String) {
