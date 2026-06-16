@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -42,7 +43,7 @@ class AppUpdateManager(private val context: Context) {
                 UpdateCheckResult.NoUpdate
             }
         } catch (e: Exception) {
-            UpdateCheckResult.Error(e.message ?: "アップデート確認に失敗しました")
+            UpdateCheckResult.Error(toUserMessage(e))
         }
     }
 
@@ -179,6 +180,16 @@ class AppUpdateManager(private val context: Context) {
             throw IllegalStateException("GitHub Releases への接続に失敗しました (${connection.responseCode})")
         }
         return connection
+    }
+
+    private fun toUserMessage(error: Exception): String {
+        return when {
+            error is IOException && error.message?.contains("404") == true ->
+                "GitHub Releases に公開済みリリースがありません"
+            error.message?.contains("(404)") == true ->
+                "GitHub Releases に公開済みリリースがありません"
+            else -> error.message ?: "アップデート確認に失敗しました"
+        }
     }
 
     private fun parseRelease(jsonText: String): UpdateInfo? {
