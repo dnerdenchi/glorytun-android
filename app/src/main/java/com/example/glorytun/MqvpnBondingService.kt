@@ -29,8 +29,7 @@ class MqvpnBondingService : MqvpnVpnService() {
     @Volatile private var isConnected = false
 
     private var statsRunning = false
-    private var previousWifiTotal = -1L
-    private var previousSimTotal = -1L
+    private val pathTrafficAccumulator = PathTrafficAccumulator()
     private var dailyWifiKB = 0.0
     private var dailySimKB = 0.0
     private var monthlyWifiKB = 0.0
@@ -256,14 +255,10 @@ class MqvpnBondingService : MqvpnVpnService() {
         override fun run() {
             if (!statsRunning) return
 
-            val totals = aggregatePathTotals(latestPaths)
-            val wifiDeltaKB = calculateDeltaKB(totals.wifiTotal, previousWifiTotal)
-            val simDeltaKB = calculateDeltaKB(totals.simTotal, previousSimTotal)
-            previousWifiTotal = totals.wifiTotal
-            previousSimTotal = totals.simTotal
+            val trafficUpdate = pathTrafficAccumulator.update(latestPaths)
 
-            updateUsageCounters(wifiDeltaKB, simDeltaKB)
-            broadcastStats(totals)
+            updateUsageCounters(trafficUpdate.wifiDeltaKB, trafficUpdate.simDeltaKB)
+            broadcastStats(trafficUpdate.totals)
 
             statsHandler.postDelayed(this, 1000)
         }
@@ -299,8 +294,7 @@ class MqvpnBondingService : MqvpnVpnService() {
     }
 
     private fun resetStatsBaselines() {
-        previousWifiTotal = -1L
-        previousSimTotal = -1L
+        pathTrafficAccumulator.reset()
         currentHourBucket = 0L
         hourlyWifiSum = 0f
         hourlySimSum = 0f
@@ -375,7 +369,7 @@ class MqvpnBondingService : MqvpnVpnService() {
         }
     }
 
-    private fun broadcastStats(totals: PathTotals) {
+    private fun broadcastStats(totals: NetworkTrafficTotals) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
             putExtra("wifi_tx_bytes", totals.wifiTx)
@@ -398,73 +392,6 @@ class MqvpnBondingService : MqvpnVpnService() {
             putExtra(GlorytunConstants.EXTRA_STATE, state)
             putExtra(GlorytunConstants.EXTRA_STATE_SOURCE, GlorytunConstants.STATE_SOURCE_VPN)
         })
-    }
-
-    private fun aggregatePathTotals(paths: List<PathInfo>): PathTotals {
-        var wifiTx = 0L
-        var wifiRx = 0L
-        var simTx = 0L
-        var simRx = 0L
-        var wifiActive = false
-        var simActive = false
-
-        paths.forEach { path ->
-            when (path.transportGroup()) {
-                TransportGroup.WIFI -> {
-                    wifiTx += path.bytesTx
-                    wifiRx += path.bytesRx
-                    wifiActive = true
-                }
-                TransportGroup.CELLULAR -> {
-                    simTx += path.bytesTx
-                    simRx += path.bytesRx
-                    simActive = true
-                }
-                TransportGroup.OTHER -> {
-                    wifiTx += path.bytesTx
-                    wifiRx += path.bytesRx
-                    wifiActive = true
-                }
-            }
-        }
-
-        return PathTotals(wifiTx, wifiRx, wifiActive, simTx, simRx, simActive)
-    }
-
-    private fun calculateDeltaKB(currentTotal: Long, previousTotal: Long): Float {
-        if (previousTotal < 0L) return 0f
-        return (currentTotal - previousTotal).coerceAtLeast(0L) / 1024f
-    }
-
-    private fun PathInfo.transportGroup(): TransportGroup {
-        val lower = iface.lowercase()
-        return when {
-            lower.startsWith("wifi") || lower.startsWith("wlan") -> TransportGroup.WIFI
-            lower.startsWith("cellular") ||
-                lower.startsWith("rmnet") ||
-                lower.startsWith("ccmni") ||
-                lower.startsWith("wwan") ||
-                lower.startsWith("pdp") -> TransportGroup.CELLULAR
-            else -> TransportGroup.OTHER
-        }
-    }
-
-    private enum class TransportGroup {
-        WIFI,
-        CELLULAR,
-        OTHER
-    }
-
-    private data class PathTotals(
-        val wifiTx: Long,
-        val wifiRx: Long,
-        val wifiActive: Boolean,
-        val simTx: Long,
-        val simRx: Long,
-        val simActive: Boolean
-    ) {
-        val wifiTotal: Long get() = wifiTx + wifiRx
-        val simTotal: Long get() = simTx + simRx
     }
 
     companion object {
