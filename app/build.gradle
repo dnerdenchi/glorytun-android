@@ -11,8 +11,8 @@ android {
         applicationId "com.example.glorytun"
         minSdk 24
         targetSdk 34
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
 
         externalNativeBuild {
             cmake {
@@ -59,4 +59,5 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.7.0'
+    testImplementation 'junit:junit:4.13.2'
 }

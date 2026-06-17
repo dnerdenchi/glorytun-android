@@ -1,6 +1,5 @@
 package com.example.glorytun
 
-import android.content.Intent
 import android.content.Context
 import android.net.VpnService
 import android.os.Bundle
@@ -121,9 +120,12 @@ class DashboardFragment : Fragment() {
 
         btnConnect.setOnClickListener {
             val state = viewModel.connectionState.value
-            if (state == "Connected" || state == "Connecting..." || state == "ProxyConnected" || state == "ProxyConnecting") {
+            if (state == ConnectionStates.DISCONNECTING) {
+                return@setOnClickListener
+            }
+            if (ConnectionStates.isConnectedOrConnecting(state)) {
                 disconnectActiveConnection(state)
-            } else if (isAdGuardProxyModeEnabled()) {
+            } else if (ConnectionController.isProxyModeEnabled(requireContext())) {
                 startProxyConnection()
             } else {
                 val intent = VpnService.prepare(requireContext())
@@ -138,7 +140,7 @@ class DashboardFragment : Fragment() {
 
     private fun updateConnectionUI(state: String) {
         when (state) {
-            "Connected" -> {
+            ConnectionStates.VPN_CONNECTED -> {
                 tvStatus.text = "接続済み"
                 tvStatus.setTextColor(resources.getColor(R.color.tertiary, null))
                 tvStatusBadge.text = "接続済み"
@@ -147,7 +149,7 @@ class DashboardFragment : Fragment() {
                 btnConnect.text = "切断"
                 btnConnect.setTextColor(resources.getColor(R.color.on_primary, null))
             }
-            "ProxyConnected" -> {
+            ConnectionStates.PROXY_CONNECTED -> {
                 tvStatus.text = "プロキシ起動中"
                 tvStatus.setTextColor(resources.getColor(R.color.tertiary, null))
                 tvStatusBadge.text = "AdGuard互換"
@@ -157,7 +159,7 @@ class DashboardFragment : Fragment() {
                 btnConnect.setTextColor(resources.getColor(R.color.on_primary, null))
                 updateEndpointInfo(viewModel.serverIp.value ?: "")
             }
-            "Connecting..." -> {
+            ConnectionStates.VPN_CONNECTING -> {
                 tvStatus.text = "接続中…"
                 tvStatus.setTextColor(resources.getColor(R.color.on_surface_variant, null))
                 tvStatusBadge.text = "接続中…"
@@ -166,7 +168,7 @@ class DashboardFragment : Fragment() {
                 btnConnect.text = "接続中…"
                 btnConnect.setTextColor(resources.getColor(R.color.on_surface, null))
             }
-            "ProxyConnecting" -> {
+            ConnectionStates.PROXY_CONNECTING -> {
                 tvStatus.text = "プロキシ起動中…"
                 tvStatus.setTextColor(resources.getColor(R.color.on_surface_variant, null))
                 tvStatusBadge.text = "起動中…"
@@ -203,59 +205,22 @@ class DashboardFragment : Fragment() {
             return
         }
 
-        requireContext().startService(Intent(requireContext(), AdGuardProxyService::class.java).apply {
-            action = GlorytunConstants.ACTION_PROXY_STOP
-        })
-
-        val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunConstants.ACTION_CONNECT
-            putExtra("IP", ip)
-            putExtra("PORT", port)
-            putExtra("SECRET", secret)
-        }
-        requireContext().startService(serviceIntent)
-        viewModel.connectionState.value = "Connecting..."
+        ConnectionController.startVpn(requireContext(), ip, port, secret)
+        viewModel.connectionState.value = ConnectionStates.VPN_CONNECTING
     }
 
     private fun startProxyConnection() {
-        requireContext().startService(Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunConstants.ACTION_DISCONNECT
-        })
-
-        val serviceIntent = Intent(requireContext(), AdGuardProxyService::class.java).apply {
-            action = GlorytunConstants.ACTION_PROXY_START
-        }
-        requireContext().startService(serviceIntent)
-        viewModel.connectionState.value = "ProxyConnecting"
+        ConnectionController.startProxy(requireContext())
+        viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
     }
 
     private fun disconnectActiveConnection(state: String?) {
-        if (state == "ProxyConnected" || state == "ProxyConnecting") {
-            val serviceIntent = Intent(requireContext(), AdGuardProxyService::class.java).apply {
-                action = GlorytunConstants.ACTION_PROXY_STOP
-            }
-            requireContext().startService(serviceIntent)
-            viewModel.connectionState.value = "Disconnecting..."
-        } else {
-            disconnectVpn()
-        }
-    }
-
-    private fun disconnectVpn() {
-        val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunConstants.ACTION_DISCONNECT
-        }
-        requireContext().startService(serviceIntent)
-        viewModel.connectionState.value = "Disconnecting..."
-    }
-
-    private fun isAdGuardProxyModeEnabled(): Boolean {
-        return requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
-            .getBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, false)
+        ConnectionController.disconnectActive(requireContext(), state)
+        viewModel.connectionState.value = ConnectionStates.DISCONNECTING
     }
 
     private fun updateEndpointInfo(ip: String) {
-        if (isAdGuardProxyModeEnabled()) {
+        if (ConnectionController.isProxyModeEnabled(requireContext())) {
             val port = requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
                 .getInt(GlorytunConstants.KEY_ADGUARD_PROXY_PORT, GlorytunConstants.DEFAULT_ADGUARD_PROXY_PORT)
             tvServerInfo.text = "AdGuard: 127.0.0.1:$port"

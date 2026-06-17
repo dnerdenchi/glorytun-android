@@ -11,6 +11,10 @@ object GlorytunConstants {
     const val ACTION_VPN_STATE = "VPN_STATE"
     const val ACTION_VPN_TRAFFIC_STATS = "VPN_TRAFFIC_STATS"
     const val ACTION_VPN_HOURLY_STATS = "VPN_HOURLY_STATS"
+    const val EXTRA_STATE = "state"
+    const val EXTRA_STATE_SOURCE = "state_source"
+    const val STATE_SOURCE_VPN = "vpn"
+    const val STATE_SOURCE_PROXY = "proxy"
 
     // --- Notification ---
     const val NOTIFICATION_ID = 1

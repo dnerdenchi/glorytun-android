@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
     private val zeroDataRunnable = object : Runnable {
         override fun run() {
             val state = viewModel.connectionState.value
-            if (state != "Connected" && state != "Connecting...") {
+            if (!ConnectionStates.isConnectedOrConnecting(state)) {
                 viewModel.addRealtimePoint(0f, 0f)
             }
             handler.postDelayed(this, 1000)
@@ -58,12 +58,15 @@ class MainActivity : AppCompatActivity() {
 
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.getStringExtra("state")?.let { state ->
-                viewModel.connectionState.value = state
-                if (state == "Disconnected") {
-                    lastStatsSource = null
-                    viewModel.reset()
-                }
+            val state = intent?.getStringExtra(GlorytunConstants.EXTRA_STATE) ?: return
+            val source = intent.getStringExtra(GlorytunConstants.EXTRA_STATE_SOURCE)
+            val currentState = viewModel.connectionState.value
+            if (!ConnectionStates.shouldAcceptBroadcast(currentState, state, source)) return
+
+            viewModel.connectionState.value = state
+            if (state == ConnectionStates.DISCONNECTED) {
+                lastStatsSource = null
+                viewModel.reset()
             }
         }
     }
@@ -71,7 +74,7 @@ class MainActivity : AppCompatActivity() {
     private val trafficReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
-            val source = intent.getStringExtra("stats_source") ?: "vpn"
+            val source = intent.getStringExtra("stats_source") ?: GlorytunConstants.STATE_SOURCE_VPN
             if (!isStatsSourceActive(source)) return
             if (lastStatsSource != source) {
                 lastStatsSource = source
@@ -98,11 +101,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isStatsSourceActive(source: String): Boolean {
-        return when (viewModel.connectionState.value) {
-            "ProxyConnected", "ProxyConnecting" -> source == "proxy"
-            "Connected", "Connecting..." -> source == "vpn"
-            else -> false
-        }
+        return ConnectionStates.isStatsSourceActive(viewModel.connectionState.value, source)
     }
 
     // 1時間ごとの集計データ保存通知を受け取り、ViewModelのメモリを更新する

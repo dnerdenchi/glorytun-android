@@ -37,7 +37,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     val realtimeSimRates = ArrayDeque<Float>()
     val realtimeUpdated = MutableLiveData(0L)
 
-    val connectionState = MutableLiveData("Disconnected")
+    val connectionState = MutableLiveData(ConnectionStates.DISCONNECTED)
 
     val wifiKBs = MutableLiveData(0f)
     val simKBs = MutableLiveData(0f)

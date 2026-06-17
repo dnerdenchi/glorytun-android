@@ -129,7 +129,7 @@ class AdGuardProxyService : VpnService() {
         startForegroundNotification(port)
         registerNetworkCallbacks()
         resetStats()
-        sendState("ProxyConnecting")
+        sendState(ConnectionStates.PROXY_CONNECTING)
 
         acceptExecutor.execute {
             try {
@@ -138,7 +138,7 @@ class AdGuardProxyService : VpnService() {
                     socket.bind(InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), port))
                     serverSocket = socket
                     Log.i(TAG, "AdGuard proxy listening on $LOOPBACK_HOST:$port")
-                    sendState("ProxyConnected")
+                    sendState(ConnectionStates.PROXY_CONNECTED)
                     statsHandler.post(statsRunnable)
 
                     while (isRunning.get()) {
@@ -154,7 +154,7 @@ class AdGuardProxyService : VpnService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Proxy start failed", e)
                 isRunning.set(false)
-                sendState("Disconnected")
+                sendState(ConnectionStates.DISCONNECTED)
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
             } finally {
@@ -165,7 +165,7 @@ class AdGuardProxyService : VpnService() {
 
     private fun stopProxy() {
         if (!isRunning.getAndSet(false)) {
-            sendState("Disconnected")
+            sendState(ConnectionStates.DISCONNECTED)
             stopSelf()
             return
         }
@@ -174,7 +174,7 @@ class AdGuardProxyService : VpnService() {
         statsHandler.removeCallbacks(statsRunnable)
         unregisterNetworkCallbacks()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        sendState("Disconnected")
+        sendState(ConnectionStates.DISCONNECTED)
         stopSelf()
     }
 
@@ -461,13 +461,14 @@ class AdGuardProxyService : VpnService() {
     }
 
     private fun sendProxyState() {
-        sendState(if (isRunning.get()) "ProxyConnected" else "Disconnected")
+        sendState(if (isRunning.get()) ConnectionStates.PROXY_CONNECTED else ConnectionStates.DISCONNECTED)
     }
 
     private fun sendState(state: String) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_STATE).apply {
             setPackage(packageName)
-            putExtra("state", state)
+            putExtra(GlorytunConstants.EXTRA_STATE, state)
+            putExtra(GlorytunConstants.EXTRA_STATE_SOURCE, GlorytunConstants.STATE_SOURCE_PROXY)
         })
     }
 
@@ -480,7 +481,7 @@ class AdGuardProxyService : VpnService() {
             putExtra("sim_tx_bytes", simTxBytes.get())
             putExtra("sim_rx_bytes", simRxBytes.get())
             putExtra("sim_active", simNetwork.get() != null)
-            putExtra("stats_source", "proxy")
+            putExtra("stats_source", GlorytunConstants.STATE_SOURCE_PROXY)
             putExtra("daily_wifi_kb", (wifiTxBytes.get() + wifiRxBytes.get()) / 1024.0)
             putExtra("daily_sim_kb", (simTxBytes.get() + simRxBytes.get()) / 1024.0)
             putExtra("wifi_throttled", false)

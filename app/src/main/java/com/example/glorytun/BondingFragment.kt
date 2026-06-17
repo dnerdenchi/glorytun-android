@@ -1,6 +1,5 @@
 package com.example.glorytun
 
-import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
 import android.os.Handler
@@ -70,8 +69,7 @@ class BondingFragment : Fragment() {
 
         // 接続状態の監視
         viewModel.connectionState.observe(viewLifecycleOwner) { state ->
-            val isConnected = state == "Connected"
-            if (isConnected) {
+            if (ConnectionStates.isConnectedOrConnecting(state)) {
                 tvActiveBadge.text = "接続済み"
                 tvActiveBadge.setTextColor(resources.getColor(R.color.tertiary, null))
                 btnQuickConnect.text = "切断"
@@ -95,9 +93,14 @@ class BondingFragment : Fragment() {
         }
 
         btnQuickConnect.setOnClickListener {
-            val isConnected = viewModel.connectionState.value == "Connected"
-            if (isConnected) {
-                disconnectVpn()
+            val state = viewModel.connectionState.value
+            if (state == ConnectionStates.DISCONNECTING) {
+                return@setOnClickListener
+            }
+            if (ConnectionStates.isConnectedOrConnecting(state)) {
+                disconnectActiveConnection(state)
+            } else if (ConnectionController.isProxyModeEnabled(requireContext())) {
+                startProxyConnection()
             } else {
                 val activeProfile = profiles.find { it.id == activeProfileId }
                 if (activeProfile == null) {
@@ -202,6 +205,21 @@ class BondingFragment : Fragment() {
         refreshActiveIndicators()
 
         if (connect) {
+            connectFromProfile(profile)
+        }
+    }
+
+    private fun connectFromProfile(profile: VpnProfile) {
+        val state = viewModel.connectionState.value
+        if (state == ConnectionStates.DISCONNECTING) return
+        if (ConnectionStates.isConnectedOrConnecting(state)) {
+            disconnectActiveConnection(state)
+            return
+        }
+
+        if (ConnectionController.isProxyModeEnabled(requireContext())) {
+            startProxyConnection()
+        } else {
             requestVpnAndConnect(profile)
         }
     }
@@ -217,22 +235,18 @@ class BondingFragment : Fragment() {
     }
 
     private fun connectWithProfile(profile: VpnProfile) {
-        val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunConstants.ACTION_CONNECT
-            putExtra("IP", profile.ip)
-            putExtra("PORT", profile.port)
-            putExtra("SECRET", profile.secret)
-        }
-        requireContext().startService(serviceIntent)
-        viewModel.connectionState.value = "Connecting..."
+        ConnectionController.startVpn(requireContext(), profile.ip, profile.port, profile.secret)
+        viewModel.connectionState.value = ConnectionStates.VPN_CONNECTING
     }
 
-    private fun disconnectVpn() {
-        val serviceIntent = Intent(requireContext(), GlorytunVpnService::class.java).apply {
-            action = GlorytunConstants.ACTION_DISCONNECT
-        }
-        requireContext().startService(serviceIntent)
-        viewModel.connectionState.value = "Disconnecting..."
+    private fun startProxyConnection() {
+        ConnectionController.startProxy(requireContext())
+        viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
+    }
+
+    private fun disconnectActiveConnection(state: String?) {
+        ConnectionController.disconnectActive(requireContext(), state)
+        viewModel.connectionState.value = ConnectionStates.DISCONNECTING
     }
 
     /**

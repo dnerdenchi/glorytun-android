@@ -167,7 +167,7 @@ class TrafficStatsManager(
             putExtra("sim_tx_bytes",  if (sTx >= 0L) sTx else 0L)
             putExtra("sim_rx_bytes",  sRx)
             putExtra("sim_active",    sActive)
-            putExtra("stats_source",  "vpn")
+            putExtra("stats_source",  GlorytunConstants.STATE_SOURCE_VPN)
             putExtra("wifi_est_bw_bytes", listener.getCurrentEstimatedWifiBw())
             putExtra("sim_est_bw_bytes",  listener.getCurrentEstimatedSimBw())
             putExtra("daily_wifi_kb", listener.getDailyWifiKB())

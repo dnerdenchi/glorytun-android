@@ -366,7 +366,7 @@ class GlorytunVpnService : VpnService() {
             return START_NOT_STICKY
         }
         if (action == GlorytunConstants.ACTION_QUERY_STATE) {
-            sendVpnState(if (isConnected) "Connected" else "Disconnected")
+            sendVpnState(if (isConnected) ConnectionStates.VPN_CONNECTED else ConnectionStates.DISCONNECTED)
             if (!isConnected) stopSelf(startId)
         }
         return if (isConnected) START_STICKY else START_NOT_STICKY
@@ -425,20 +425,20 @@ class GlorytunVpnService : VpnService() {
                 if (vpnInterface != null) {
                     isConnected = true
                     startForegroundNotification()
-                    sendVpnState("Connected")
+                    sendVpnState(ConnectionStates.VPN_CONNECTED)
 
                     val keyfilePath = File(cacheDir, "keyfile.txt").absolutePath
                     startGlorytunNative(vpnInterface!!.fd, serverIp, port, secret, keyfilePath)
                     waitForGlorytunReady()
                 } else {
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                    sendVpnState("Disconnected")
+                    sendVpnState(ConnectionStates.DISCONNECTED)
                     stopSelf()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "VPN Setup failed", e)
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                sendVpnState("Disconnected")
+                sendVpnState(ConnectionStates.DISCONNECTED)
                 stopSelf()
             }
         }.start()
@@ -537,14 +537,15 @@ class GlorytunVpnService : VpnService() {
         }
         vpnInterface = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        sendVpnState("Disconnected")
+        sendVpnState(ConnectionStates.DISCONNECTED)
         stopSelf()
     }
 
     private fun sendVpnState(state: String) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_STATE).apply {
             setPackage(packageName)
-            putExtra("state", state)
+            putExtra(GlorytunConstants.EXTRA_STATE, state)
+            putExtra(GlorytunConstants.EXTRA_STATE_SOURCE, GlorytunConstants.STATE_SOURCE_VPN)
         })
     }
 
