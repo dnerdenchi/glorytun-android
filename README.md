@@ -1,57 +1,63 @@
 # BondVPN Android
 
-BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mqvpn) を動かす VPN アプリです。mqvpn は MASQUE CONNECT-IP と Multipath QUIC を使うため、Wi-Fi / モバイル回線など複数経路を 1 本の VPN トンネルとして扱えます。
+BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mqvpn) を動かす VPN アプリです。mqvpn は MASQUE CONNECT-IP と Multipath QUIC を使い、Wi-Fi やモバイル回線など複数の経路を 1 本の VPN トンネルとして扱えます。
 
-## 現在の構成
+## 特徴
+
+- Android の VPN 機能を使って mqvpn トンネルへ接続します。
+- mqvpn の Multipath QUIC / WLB scheduler により、複数回線の利用を前提にしています。
+- GitHub Releases の APK asset を参照するアプリ内更新機能を備えています。
+- 現在の native bridge は `arm64-v8a` 向けです。
+
+## 動作環境
 
 | 項目 | 内容 |
 | --- | --- |
 | VPN エンジン | mqvpn v0.7.0 |
-| ボンディング方式 | mqvpn の Multipath QUIC / WLB scheduler |
 | Android 側 | Kotlin + mqvpn Android SDK source |
-| Native 側 | 公式 mqvpn sample APK 由来の `libmqvpn_jni.so` |
+| Native 側 | mqvpn Android 向け `libmqvpn_jni.so` |
 | 対応 ABI | `arm64-v8a` |
 | 最小 Android | API 26 |
-| アプリ更新 | GitHub Releases の APK asset をアプリ内 updater が参照 |
+| アプリ更新 | GitHub Releases の APK asset |
 
-glorytun 時代の CMake/JNI/libsodium/glorytun ソースは削除済みです。アプリ固有の mqvpn 依存は主に次の 2 箇所へ寄せています。
+## Android アプリのビルド
 
-- `MqvpnConfigFactory.kt`: UI のプロファイル設定を mqvpn の `MqvpnConfig` へ変換する。
-- `MqvpnBondingService.kt`: `MqvpnVpnService` を継承し、状態通知と通信統計を既存 UI 用 broadcast へ変換する。
-
-mqvpn 本体の更新が入った場合は、この境界を保ったまま `com.mqvpn.sdk.*` と `libmqvpn_jni.so` を更新してください。
-
-## Android ビルド
-
-この環境では Gradle wrapper 実体が無くても、キャッシュ済み Gradle と Android Studio JBR でビルドできます。
+このリポジトリでは Gradle wrapper が無い環境でも、ローカルに Gradle と JDK が入っていればビルドできます。Windows で Android Studio 付属 JBR を使う例です。
 
 ```powershell
 $env:JAVA_HOME="D:\Soft\AndroidStudio\jbr"
 gradle assembleDebug
 ```
 
-生成物:
+生成される APK:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## アプリ側プロファイル
+テストも実行する場合:
 
-接続タブで次を登録します。
+```powershell
+$env:JAVA_HOME="D:\Soft\AndroidStudio\jbr"
+gradle test assembleDebug
+```
+
+## Android アプリの接続設定
+
+アプリの接続プロファイルには、mqvpn サーバーの情報を登録します。
 
 | 入力 | 説明 |
 | --- | --- |
-| サーバーアドレス | mqvpn サーバーの IP またはホスト名 |
-| ポート番号 | 通常は `443` |
-| mqvpn 認証キー | サーバーの `/etc/mqvpn/server.conf` にある `[Auth] Key` |
-| 自己署名証明書を許可する | install script で作った自己署名証明書のサーバーへ接続する場合はオン |
+| サーバーアドレス | mqvpn サーバーの IP アドレスまたは DNS 名 |
+| ポート番号 | サーバー側で待ち受ける UDP ポート。標準例は `443` |
+| mqvpn 認証キー | サーバーの `/etc/mqvpn/server.conf` にある `[Auth] Key` の値 |
+| 自己署名証明書を許可する | install script 標準の自己署名証明書を使う場合はオン |
 
-本番運用で Let's Encrypt など信頼済み証明書を使う場合は、「自己署名証明書を許可する」をオフにします。
+Let's Encrypt などの信頼済み証明書をサーバーに設定している場合は、「自己署名証明書を許可する」をオフにしてください。
 
-## mqvpn サーバーを建てる方法
+## mqvpn サーバーのセットアップ
 
-Ubuntu / Debian 系の VPS を例にします。サーバー側は UDP 443 を使います。
+Ubuntu / Debian 系の VPS に mqvpn サーバーを建てる例です。以下では UDP 443 を使います。
 
 ### 1. OS を更新する
 
@@ -60,18 +66,32 @@ sudo apt update
 sudo apt upgrade -y
 ```
 
-### 2. mqvpn をインストールして起動する
+Ubuntu 24.04 で `libevent-2.1.so.7` が見つからない場合は、mqvpn の実行に必要な libevent を追加します。
 
-公式 install script で最新 release を入れます。
+```bash
+sudo apt install -y libevent-2.1-7t64 libevent-pthreads-2.1-7t64
+```
+
+### 2. mqvpn をインストールする
+
+公式 install script で最新 release をインストールし、systemd service として起動します。
 
 ```bash
 curl -fsSL https://github.com/mp0rta/mqvpn/releases/latest/download/install.sh \
   | sudo bash -s -- --start --port 443 --subnet 10.8.0.0/24
 ```
 
-この手順では `/etc/mqvpn/server.conf`、自己署名 TLS 証明書、認証キーが作られ、`mqvpn-server` systemd service が起動します。
+この手順で主に次のファイルと service が作られます。
 
-### 3. UDP 443 を開ける
+| パス / service | 内容 |
+| --- | --- |
+| `/usr/local/bin/mqvpn` | mqvpn 本体 |
+| `/etc/mqvpn/server.conf` | サーバー設定 |
+| `/etc/mqvpn/server.crt` | TLS 証明書 |
+| `/etc/mqvpn/server.key` | TLS 秘密鍵 |
+| `mqvpn-server.service` | systemd service |
+
+### 3. UDP ポートを開ける
 
 UFW を使っている場合:
 
@@ -80,7 +100,7 @@ sudo ufw allow 443/udp
 sudo ufw reload
 ```
 
-クラウド側の security group / firewall でも UDP 443 を許可してください。
+VPS 事業者側の security group / firewall でも UDP 443 を許可してください。
 
 ### 4. 認証キーを確認する
 
@@ -88,46 +108,116 @@ sudo ufw reload
 sudo grep -A3 '^\[Auth\]' /etc/mqvpn/server.conf
 ```
 
-`Key = ...` の値を Android アプリの「mqvpn 認証キー」に入れます。
+`Key = ...` の値を Android アプリの「mqvpn 認証キー」に入力します。
 
-### 5. サービス状態を確認する
+### 5. 起動状態を確認する
 
 ```bash
-sudo systemctl status mqvpn-server
+sudo systemctl status mqvpn-server --no-pager
+sudo journalctl -u mqvpn-server -n 100 --no-pager
+```
+
+ログを追い続ける場合:
+
+```bash
 sudo journalctl -u mqvpn-server -f
 ```
 
-### 6. Android から接続する
+## サーバー再起動後の起動方法
 
-アプリでプロファイルを作成します。
+install script に `--start` を付けて実行した場合、`mqvpn-server` は systemd service として登録されます。自動起動が有効になっていれば、VPS を再起動しても mqvpn は自動的に起動します。
 
-- サーバーアドレス: VPS のグローバル IP または DNS 名
-- ポート番号: `443`
-- mqvpn 認証キー: `/etc/mqvpn/server.conf` の `[Auth] Key`
-- 自己署名証明書を許可する: install script 標準の自己署名証明書ならオン
+自動起動が有効か確認します。
 
-## 本番向けの注意
+```bash
+sudo systemctl is-enabled mqvpn-server
+```
 
+`enabled` ではない場合は、自動起動を有効化します。
+
+```bash
+sudo systemctl enable mqvpn-server
+```
+
+サーバー再起動後に手動で起動する場合:
+
+```bash
+sudo systemctl start mqvpn-server
+```
+
+再起動後の確認:
+
+```bash
+sudo systemctl status mqvpn-server --no-pager
+sudo ss -lunp | grep ':443'
+```
+
+設定を変更したあとに mqvpn だけ再起動する場合:
+
+```bash
+sudo systemctl restart mqvpn-server
+```
+
+## サーバー設定の変更
+
+サーバー設定は `/etc/mqvpn/server.conf` にあります。変更後は service を再起動してください。
+
+```bash
+sudo nano /etc/mqvpn/server.conf
+sudo systemctl restart mqvpn-server
+```
+
+ポートを 443 以外に変更した場合は、アプリ側プロファイルのポート番号と firewall 設定も同じ値に変更します。
+
+## アンインストール
+
+mqvpn を削除する場合は、公式 install script の `--uninstall` を使います。
+
+```bash
+curl -fsSL https://github.com/mp0rta/mqvpn/releases/latest/download/install.sh \
+  | sudo bash -s -- --uninstall
+```
+
+削除後に service が残っていないか確認します。
+
+```bash
+systemctl status mqvpn-server --no-pager
+```
+
+設定や証明書を手元に残したくない場合は、内容を確認してから `/etc/mqvpn` を削除します。
+
+```bash
+sudo rm -rf /etc/mqvpn
+```
+
+UFW の許可ルールも不要なら削除します。
+
+```bash
+sudo ufw delete allow 443/udp
+sudo ufw reload
+```
+
+## セキュリティ上の注意
+
+- UDP 443 は必要な接続元からのみ到達できるよう、VPS 側 firewall で制限できる場合は制限してください。
 - 自己署名証明書は検証を緩めるため、公開運用では Let's Encrypt などの信頼済み証明書へ置き換えることを推奨します。
 - mqvpn の control API は認証なしのため、有効化する場合は `127.0.0.1` bind と firewall / SSH tunnel で保護してください。
-- 複数ユーザーを使う場合は server config の `[Auth] User = name:key` 形式を使うと、サーバー側メトリクスをユーザー単位で分けやすくなります。
+- systemd service の実行ユーザーや capability を変更する場合は、TUN 作成、ルーティング、低番ポートの bind に必要な権限が残っているか確認してください。
 
-## mqvpn を更新する時の作業メモ
+## 開発者向け構成
 
-1. 公式 release を確認し、SDK source と `libmqvpn_jni.so` の互換性を確認する。
-2. `app/src/main/java/com/mqvpn/sdk/` を新しい mqvpn Android SDK source に更新する。
-3. 公式 sample APK または自前ビルドから `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` を更新する。
-4. `MqvpnConfigFactory.kt` と `MqvpnBondingService.kt` の compile error だけを直す。UI 側へ mqvpn API を直接広げない。
-5. `app/build.gradle` の `versionCode` / `versionName` を semantic versioning に沿って上げる。
-6. `gradle test assembleDebug` を実行する。
-7. GitHub に push し、同じ version の GitHub Release に APK asset を公開する。
-
-## 主なファイル
+mqvpn との接続部分は、Android アプリ側の設定変換と VPN service 実装に分けています。mqvpn 本体や SDK を更新する場合は、この境界を保つとアプリ側 UI への影響を抑えられます。
 
 | ファイル | 役割 |
 | --- | --- |
-| `app/src/main/java/com/example/glorytun/MqvpnBondingService.kt` | mqvpn VPN service 実装 |
-| `app/src/main/java/com/example/glorytun/MqvpnConfigFactory.kt` | app 設定から mqvpn config への変換 |
+| `app/src/main/java/com/example/glorytun/MqvpnConfigFactory.kt` | アプリの接続プロファイルから mqvpn config を生成 |
+| `app/src/main/java/com/example/glorytun/MqvpnBondingService.kt` | mqvpn VPN service と既存 UI への状態通知を接続 |
 | `app/src/main/java/com/mqvpn/sdk/` | mqvpn Android SDK source |
 | `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` | mqvpn native bridge |
-| `app/src/main/java/com/example/glorytun/AppUpdateManager.kt` | GitHub Releases updater |
+| `app/src/main/java/com/example/glorytun/AppUpdateManager.kt` | GitHub Releases を参照するアプリ内 updater |
+
+## リリース
+
+公開する APK は GitHub Releases に添付します。アプリ内 updater は GitHub Releases の最新 release と APK asset を参照します。
+
+リリース時は `app/build.gradle` の `versionCode` / `versionName` を更新し、semantic versioning に沿った tag と release 名を使ってください。
