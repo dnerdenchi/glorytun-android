@@ -93,6 +93,9 @@ class StatsFragment : Fragment() {
         viewModel.wifiKBs.observe(viewLifecycleOwner) {
             updateGraphForFilter(currentFilter)
         }
+        viewModel.simKBs.observe(viewLifecycleOwner) {
+            updateGraphForFilter(currentFilter)
+        }
     }
 
     private fun updateGraphForFilter(filter: String) {

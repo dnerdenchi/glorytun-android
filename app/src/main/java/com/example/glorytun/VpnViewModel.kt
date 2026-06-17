@@ -5,12 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.MutableLiveData
 import java.util.Calendar
 
-/** 時刻付き通信量データポイント */
 data class TrafficPoint(val timestamp: Long, val wifiKBs: Float, val simKBs: Float)
 
-/** 応答確認キャッシュエントリ */
 data class ServerCheckEntry(
-    val checkedAt: Long,       // System.currentTimeMillis()
+    val checkedAt: Long,
     val reachable: Boolean,
     val detail: String,
     val rttMs: Long
@@ -19,20 +17,9 @@ data class ServerCheckEntry(
 class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     val trafficDataStore = TrafficDataStore(application)
-
-    /**
-     * 永続化された時間単位の通信量履歴（アプリ起動時にファイルからロード）。
-     * MqvpnBondingService が1時間ごとに集計・保存したデータ。
-     */
     val historicalPoints = mutableListOf<TrafficPoint>()
-
-    /**
-     * 現在のセッションの通信量履歴（最大24時間分 = 86400点）。
-     * VPN接続中のみ追加される。
-     */
     val trafficHistory = mutableListOf<TrafficPoint>()
 
-    /** リアルタイムグラフ用データ（最大60点）- タブを切り替えても保持される */
     val realtimeWifiRates = ArrayDeque<Float>()
     val realtimeSimRates = ArrayDeque<Float>()
     val realtimeUpdated = MutableLiveData(0L)
@@ -44,54 +31,47 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     val wifiTotalBytes = MutableLiveData(0L)
     val simTotalBytes = MutableLiveData(0L)
 
-    /** 当日（0時〜現在）の通信量（バイト） */
     val wifiDailyBytes = MutableLiveData(0L)
     val simDailyBytes = MutableLiveData(0L)
 
-    /** 通信制限中フラグ */
     val wifiThrottled = MutableLiveData(false)
     val simThrottled = MutableLiveData(false)
 
     val maxWifiKBs = MutableLiveData(0f)
     val maxSimKBs = MutableLiveData(0f)
 
-    // 前回値（スループット計算用）
-    var prevWifiTx = 0L
-    var prevWifiRx = 0L
-    var prevSimTx = 0L
-    var prevSimRx = 0L
-
-    // サーバー設定
     val serverIp = MutableLiveData("")
     val serverPort = MutableLiveData(MqvpnConfigFactory.DEFAULT_PORT)
-
-    /** profileId → 最後の応答確認結果（ページ遷移を跨いで保持） */
     val serverCheckCache = mutableMapOf<String, ServerCheckEntry>()
 
+    private val trafficRateCalculator = TrafficRateCalculator()
+
     init {
-        // アプリ起動時に永続化済みの時間集計データをロード
         historicalPoints.addAll(trafficDataStore.load())
-        // historicalPoints から当日分の通信量を計算して初期値を設定
+
         val todayStart = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }.timeInMillis
+
         var dWifi = 0L
         var dSim = 0L
-        for (p in historicalPoints) {
-            if (p.timestamp >= todayStart) {
-                dWifi += (p.wifiKBs * 3600 * 1024).toLong()
-                dSim  += (p.simKBs  * 3600 * 1024).toLong()
+        for (point in historicalPoints) {
+            if (point.timestamp >= todayStart) {
+                dWifi += (point.wifiKBs * 3600 * 1024).toLong()
+                dSim += (point.simKBs * 3600 * 1024).toLong()
             }
         }
         wifiDailyBytes.value = dWifi
-        simDailyBytes.value  = dSim
+        simDailyBytes.value = dSim
     }
 
-    /** サービスが1時間分の集計を保存したときに呼ばれる（重複防止済み） */
     fun addHistoricalPoint(point: TrafficPoint) {
         val existingIdx = historicalPoints.indexOfFirst {
-            it.timestamp / 3_600_000L == point.timestamp / 3_600_000L
+            it.timestamp / GlorytunConstants.MILLIS_IN_HOUR ==
+                point.timestamp / GlorytunConstants.MILLIS_IN_HOUR
         }
         if (existingIdx >= 0) {
             historicalPoints[existingIdx] = point
@@ -108,49 +88,35 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         simTx: Long,
         simRx: Long
     ) {
-        val newWifiKBs = if (wifiActive && prevWifiTx > 0) {
-            ((wifiTx - prevWifiTx) + (wifiRx - prevWifiRx)).coerceAtLeast(0L) / 1024f
-        } else 0f
+        val nowMs = System.currentTimeMillis()
+        val rates = trafficRateCalculator.update(
+            nowMs = nowMs,
+            wifiActive = wifiActive,
+            simActive = simActive,
+            wifiTx = wifiTx,
+            wifiRx = wifiRx,
+            simTx = simTx,
+            simRx = simRx
+        )
 
-        val newSimKBs = if (simActive && prevSimTx > 0) {
-            ((simTx - prevSimTx) + (simRx - prevSimRx)).coerceAtLeast(0L) / 1024f
-        } else 0f
+        wifiKBs.value = rates.wifiKBs
+        simKBs.value = rates.simKBs
 
-        wifiKBs.value = newWifiKBs
-        simKBs.value = newSimKBs
+        if (rates.wifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = rates.wifiKBs
+        if (rates.simKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = rates.simKBs
 
-        if (newWifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = newWifiKBs
-        if (newSimKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = newSimKBs
+        trafficHistory.add(TrafficPoint(nowMs, rates.wifiKBs, rates.simKBs))
+        while (trafficHistory.size > MAX_TRAFFIC_HISTORY_POINTS) trafficHistory.removeAt(0)
 
-        // 現セッションの履歴に追加（最大86400点 = 24時間分）
-        trafficHistory.add(TrafficPoint(System.currentTimeMillis(), newWifiKBs, newSimKBs))
-        while (trafficHistory.size > 86400) trafficHistory.removeAt(0)
+        addRealtimePoint(rates.wifiKBs, rates.simKBs)
 
-        // リアルタイムグラフ用データを更新
-        addRealtimePoint(newWifiKBs, newSimKBs)
-
-        if (wifiActive) {
-            wifiTotalBytes.value = wifiTx + wifiRx
-            prevWifiTx = wifiTx
-            prevWifiRx = wifiRx
-        } else {
-            prevWifiTx = 0L
-            prevWifiRx = 0L
-        }
-
-        if (simActive) {
-            simTotalBytes.value = simTx + simRx
-            prevSimTx = simTx
-            prevSimRx = simRx
-        } else {
-            prevSimTx = 0L
-            prevSimRx = 0L
-        }
+        wifiTotalBytes.value = rates.wifiTotalBytes
+        simTotalBytes.value = rates.simTotalBytes
     }
 
     fun addRealtimePoint(wifi: Float, sim: Float) {
-        if (realtimeWifiRates.size >= 60) realtimeWifiRates.removeFirst()
-        if (realtimeSimRates.size >= 60) realtimeSimRates.removeFirst()
+        if (realtimeWifiRates.size >= MAX_REALTIME_POINTS) realtimeWifiRates.removeFirst()
+        if (realtimeSimRates.size >= MAX_REALTIME_POINTS) realtimeSimRates.removeFirst()
         realtimeWifiRates.addLast(wifi.coerceAtLeast(0f))
         realtimeSimRates.addLast(sim.coerceAtLeast(0f))
         realtimeUpdated.value = System.currentTimeMillis()
@@ -163,42 +129,41 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resetTrafficBaselines(clearSessionHistory: Boolean = false) {
-        prevWifiTx = 0L
-        prevWifiRx = 0L
-        prevSimTx = 0L
-        prevSimRx = 0L
+        trafficRateCalculator.reset()
         wifiKBs.value = 0f
         simKBs.value = 0f
+        wifiTotalBytes.value = 0L
+        simTotalBytes.value = 0L
         if (clearSessionHistory) {
             trafficHistory.clear()
             resetRealtimeData()
         }
     }
 
-    /** VPN接続中にブロードキャストから受け取った当日通信量・制限状態を更新する */
-    fun updateDailyTraffic(wifiKB: Double, simKB: Double, wThrottled: Boolean, sThrottled: Boolean) {
+    fun updateDailyTraffic(
+        wifiKB: Double,
+        simKB: Double,
+        wThrottled: Boolean,
+        sThrottled: Boolean
+    ) {
         wifiDailyBytes.value = (wifiKB * 1024).toLong()
-        simDailyBytes.value  = (simKB  * 1024).toLong()
-        wifiThrottled.value  = wThrottled
-        simThrottled.value   = sThrottled
+        simDailyBytes.value = (simKB * 1024).toLong()
+        wifiThrottled.value = wThrottled
+        simThrottled.value = sThrottled
     }
 
     fun reset() {
         resetTrafficBaselines(clearSessionHistory = true)
         wifiThrottled.value = false
-        simThrottled.value  = false
+        simThrottled.value = false
     }
 
-    /**
-     * KB/s → bps 変換して適切な単位で表示する。
-     * 100 kbps 超は Mbps 表示。
-     */
     fun formatBps(kbs: Float): String {
-        val bps = kbs * 8192f   // KB/s × 8 × 1024 = bps
+        val bps = kbs * 8192f
         return when {
             bps >= 100_000f -> "%.2f Mbps".format(bps / 1_000_000f)
-            bps >= 1000f    -> "%.1f kbps".format(bps / 1000f)
-            else            -> "%.0f bps".format(bps)
+            bps >= 1000f -> "%.1f kbps".format(bps / 1000f)
+            else -> "%.0f bps".format(bps)
         }
     }
 
@@ -207,7 +172,12 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824f)
             bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576f)
             bytes >= 1024L -> "%.1f KB".format(bytes / 1024f)
-            else -> "%.2f GB".format(bytes / 1_073_741_824f)
+            else -> "$bytes B"
         }
+    }
+
+    private companion object {
+        const val MAX_REALTIME_POINTS = 60
+        const val MAX_TRAFFIC_HISTORY_POINTS = 86_400
     }
 }
