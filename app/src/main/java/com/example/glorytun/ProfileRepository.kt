@@ -28,7 +28,11 @@ class ProfileRepository(context: Context) {
                     name = obj.getString("name"),
                     ip = obj.getString("ip"),
                     port = obj.getString("port"),
-                    secret = obj.getString("secret")
+                    secret = obj.getString("secret"),
+                    allowInsecureCertificate = obj.optBoolean(
+                        "allow_insecure_certificate",
+                        MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
+                    )
                 )
             }
         } catch (e: Exception) {
@@ -45,6 +49,7 @@ class ProfileRepository(context: Context) {
                 put("ip", p.ip)
                 put("port", p.port)
                 put("secret", p.secret)
+                put("allow_insecure_certificate", p.allowInsecureCertificate)
             })
         }
         prefs.edit().putString("profiles", arr.toString()).apply()
@@ -64,7 +69,12 @@ class ProfileRepository(context: Context) {
     fun migrateFromLegacy(ip: String, port: String, secret: String) {
         if (loadProfiles().isNotEmpty()) return
         if (ip.isEmpty()) return
-        val profile = VpnProfile(name = "デフォルト", ip = ip, port = port, secret = secret)
+        val profile = VpnProfile(
+            name = "デフォルト",
+            ip = ip,
+            port = port,
+            secret = secret
+        )
         saveProfiles(listOf(profile))
         setActiveProfileId(profile.id)
     }

@@ -1,170 +1,133 @@
-# Glorytun Android
+# BondVPN Android
 
-Android (Kotlin + JNI/C) で [glorytun](https://github.com/angt/glorytun) を動作させる VPN アプリです。
-`VpnService` API を利用して非 root 環境で TUN デバイスを確立し、WiFi と SIM カードの **マルチパス同時通信**に対応しています。
+BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mqvpn) を動かす VPN アプリです。mqvpn は MASQUE CONNECT-IP と Multipath QUIC を使うため、Wi-Fi / モバイル回線など複数経路を 1 本の VPN トンネルとして扱えます。
 
----
+## 現在の構成
 
-## 特徴
+| 項目 | 内容 |
+| --- | --- |
+| VPN エンジン | mqvpn v0.7.0 |
+| ボンディング方式 | mqvpn の Multipath QUIC / WLB scheduler |
+| Android 側 | Kotlin + mqvpn Android SDK source |
+| Native 側 | 公式 mqvpn sample APK 由来の `libmqvpn_jni.so` |
+| 対応 ABI | `arm64-v8a` |
+| 最小 Android | API 26 |
+| アプリ更新 | GitHub Releases の APK asset をアプリ内 updater が参照 |
 
-| 機能 | 詳細 |
-|------|------|
-| **暗号化 VPN トンネル** | glorytun + libsodium による AEGIS-256 / ChaCha20-Poly1305 暗号化 |
-| **マルチパス対応** | WiFi と SIM カードを同時使用し帯域を束ねる (Phase 2 実装済み) |
-| **フルトンネル** | 全トラフィックを VPN 経由でルーティング (IPv4/IPv6) |
-| **ループ防止** | `VpnService.protect()` により VPN パケット自体の再注入を防止 |
-| **設定の永続化** | `EncryptedSharedPreferences` でサーバー情報を安全に保存 |
+glorytun 時代の CMake/JNI/libsodium/glorytun ソースは削除済みです。アプリ固有の mqvpn 依存は主に次の 2 箇所へ寄せています。
 
----
+- `MqvpnConfigFactory.kt`: UI のプロファイル設定を mqvpn の `MqvpnConfig` へ変換する。
+- `MqvpnBondingService.kt`: `MqvpnVpnService` を継承し、状態通知と通信統計を既存 UI 用 broadcast へ変換する。
 
-## アーキテクチャ概要
+mqvpn 本体の更新が入った場合は、この境界を保ったまま `com.mqvpn.sdk.*` と `libmqvpn_jni.so` を更新してください。
 
-通常の Linux では glorytun が root 権限で `/dev/net/tun` を直接開きますが、Android (非 root) ではこれができません。
-本アプリは `VpnService.Builder` で TUN の fd を取得し、JNI を介して C 層へ渡すことでこれを回避しています。
+## Android ビルド
 
-```
-MainActivity
-  └─ GlorytunVpnService (VpnService)
-       ├─ VpnService.Builder.establish() → TUN fd 取得
-       ├─ startGlorytunNative(fd, ip, port, secret)  ← JNI
-       │    └─ pthread → glorytun_main → gt_bind (select ループ)
-       └─ NetworkCallback (WiFi / SIM)
-            ├─ addPathForNetwork()    ← JNI: mud にパス追加
-            └─ removePathForNetwork() ← JNI: mud からパス削除
+この環境では Gradle wrapper 実体が無くても、キャッシュ済み Gradle と Android Studio JBR でビルドできます。
+
+```powershell
+$env:JAVA_HOME="D:\Soft\AndroidStudio\jbr"
+gradle assembleDebug
 ```
 
-### 技術スタック
+生成物:
 
-- **言語**: Kotlin (Android) + C (glorytun/mud コア)
-- **ビルド**: Gradle + CMake (Android NDK)
-- **対象 ABI**: `arm64-v8a`
-- **最小 SDK**: 24 (Android 7.0)
-- **ターゲット SDK**: 34 (Android 14)
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
----
+## アプリ側プロファイル
 
-## ビルド方法
+接続タブで次を登録します。
 
-### 前提条件
+| 入力 | 説明 |
+| --- | --- |
+| サーバーアドレス | mqvpn サーバーの IP またはホスト名 |
+| ポート番号 | 通常は `443` |
+| mqvpn 認証キー | サーバーの `/etc/mqvpn/server.conf` にある `[Auth] Key` |
+| 自己署名証明書を許可する | install script で作った自己署名証明書のサーバーへ接続する場合はオン |
 
-- Android Studio (最新版推奨)
-- Android NDK (CMake 3.22.1 以上)
-- `libsodium.a` が `app/src/main/cpp/libs/arm64-v8a/` に配置済みであること
+本番運用で Let's Encrypt など信頼済み証明書を使う場合は、「自己署名証明書を許可する」をオフにします。
 
-### 手順
+## mqvpn サーバーを建てる方法
 
-1. このリポジトリをクローン (サブモジュールごと)
+Ubuntu / Debian 系の VPS を例にします。サーバー側は UDP 443 を使います。
 
-   ```bash
-   git clone --recurse-submodules <repo-url>
-   ```
-
-2. Android Studio でプロジェクトを開き、**Sync Project with Gradle Files** を実行
-
-3. CMake が自動的に glorytun と libsodium をコンパイル・リンクします
-
-4. デバイスまたはエミュレータにインストールして動作確認
-
-> **注意**: JNI 側で glorytun に渡すコマンドライン引数はサーバーの設定に合わせて調整してください。
-
----
-
-## サーバー側のセットアップ (Linux / Ubuntu)
-
-### 1. glorytun のインストール
+### 1. OS を更新する
 
 ```bash
-# ソースからビルド、またはパッケージマネージャ経由でインストール
+sudo apt update
+sudo apt upgrade -y
 ```
 
-### 2. シークレットキーの作成
+### 2. mqvpn をインストールして起動する
 
-**推奨 (自動生成)**
+公式 install script で最新 release を入れます。
 
 ```bash
-glorytun keygen > secret.key
+curl -fsSL https://github.com/mp0rta/mqvpn/releases/latest/download/install.sh \
+  | sudo bash -s -- --start --port 443 --subnet 10.8.0.0/24
 ```
 
-**手動作成**
+この手順では `/etc/mqvpn/server.conf`、自己署名 TLS 証明書、認証キーが作られ、`mqvpn-server` systemd service が起動します。
+
+### 3. UDP 443 を開ける
+
+UFW を使っている場合:
 
 ```bash
-# 32バイト = 64文字の hex 文字列
-echo "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" > secret.key
+sudo ufw allow 443/udp
+sudo ufw reload
 ```
 
-### 3. サーバー起動
+クラウド側の security group / firewall でも UDP 443 を許可してください。
 
-サーバー IP: `1.2.3.4`、ポート: `5000`、Android 側 IP: `10.0.1.2` の例:
+### 4. 認証キーを確認する
 
 ```bash
-# IP フォワーディングを有効化
-sudo sysctl -w net.ipv4.ip_forward=1
-
-# glorytun 起動 (tun0 を作成して待機)
-sudo glorytun bind dev tun0 keyfile secret.key
-
-# IP アドレスの設定
-sudo ip address add 10.0.1.1 peer 10.0.1.2/32 dev tun0
-sudo ip link set tun0 up
-
-# MTU 設定
-sudo ip link set tun0 mtu 1420
+sudo grep -A3 '^\[Auth\]' /etc/mqvpn/server.conf
 ```
 
-### 4. ファイアウォール設定
+`Key = ...` の値を Android アプリの「mqvpn 認証キー」に入れます。
+
+### 5. サービス状態を確認する
 
 ```bash
-# TCP MSS Clamping (モバイル回線での安定化)
-sudo iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-
-# NAT (Android からのトラフィックをインターネットへ転送)
-sudo iptables -t nat -A POSTROUTING -s 10.0.1.2 -j MASQUERADE
-sudo iptables -A FORWARD -i tun0 -j ACCEPT
-sudo iptables -A FORWARD -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo systemctl status mqvpn-server
+sudo journalctl -u mqvpn-server -f
 ```
 
----
+### 6. Android から接続する
 
-## マルチパス動作 (WiFi + SIM 同時使用)
+アプリでプロファイルを作成します。
 
-```
-GlorytunVpnService
-  ├─ wifiCallback.onAvailable  → addPathForNetwork(wifiLocalIp,  wifiHandle)
-  ├─ wifiCallback.onLost       → removePathForNetwork(wifiLocalIp)
-  ├─ cellCallback.onAvailable  → addPathForNetwork(cellLocalIp,  cellHandle)
-  └─ cellCallback.onLost       → removePathForNetwork(cellLocalIp)
+- サーバーアドレス: VPS のグローバル IP または DNS 名
+- ポート番号: `443`
+- mqvpn 認証キー: `/etc/mqvpn/server.conf` の `[Auth] Key`
+- 自己署名証明書を許可する: install script 標準の自己署名証明書ならオン
 
-addPathForNetwork (JNI):
-  1. UDP ソケットを新規作成
-  2. VpnService.protect() でルーティングループ防止
-  3. Network.bindSocket() で特定ネットワークに紐付け
-  4. mud_set_path_socket() で mud の epoll に登録
+## 本番向けの注意
 
-mud (C):
-  - 各パスを epoll で監視
-  - RTT・帯域幅に基づいてパスを動的に選択
-  - 最大 32 パスをサポート
-```
+- 自己署名証明書は検証を緩めるため、公開運用では Let's Encrypt などの信頼済み証明書へ置き換えることを推奨します。
+- mqvpn の control API は認証なしのため、有効化する場合は `127.0.0.1` bind と firewall / SSH tunnel で保護してください。
+- 複数ユーザーを使う場合は server config の `[Auth] User = name:key` 形式を使うと、サーバー側メトリクスをユーザー単位で分けやすくなります。
 
----
+## mqvpn を更新する時の作業メモ
 
-## Android 権限
+1. 公式 release を確認し、SDK source と `libmqvpn_jni.so` の互換性を確認する。
+2. `app/src/main/java/com/mqvpn/sdk/` を新しい mqvpn Android SDK source に更新する。
+3. 公式 sample APK または自前ビルドから `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` を更新する。
+4. `MqvpnConfigFactory.kt` と `MqvpnBondingService.kt` の compile error だけを直す。UI 側へ mqvpn API を直接広げない。
+5. `app/build.gradle` の `versionCode` / `versionName` を semantic versioning に沿って上げる。
+6. `gradle test assembleDebug` を実行する。
+7. GitHub に push し、同じ version の GitHub Release に APK asset を公開する。
 
-| 権限 | 用途 |
-|------|------|
-| `INTERNET` | VPN トンネル通信 |
-| `ACCESS_NETWORK_STATE` | ネットワーク状態の取得 |
-| `CHANGE_NETWORK_STATE` | マルチパス用ネットワーク要求 |
-| `FOREGROUND_SERVICE` | バックグラウンドでの VPN 維持 |
-| `FOREGROUND_SERVICE_CONNECTED_DEVICE` | Android 14+ 対応 |
+## 主なファイル
 
----
-
-## 依存ライブラリ
-
-| ライブラリ | 用途 |
-|-----------|------|
-| [libsodium](https://libsodium.org/) | 暗号化 (ChaCha20-Poly1305 / AEGIS-256) |
-| [glorytun](https://github.com/angt/glorytun) | マルチパス UDP VPN コア |
-| `androidx.security:security-crypto` | 設定情報の暗号化保存 |
-| `com.google.android.material` | Material Design UI |
+| ファイル | 役割 |
+| --- | --- |
+| `app/src/main/java/com/example/glorytun/MqvpnBondingService.kt` | mqvpn VPN service 実装 |
+| `app/src/main/java/com/example/glorytun/MqvpnConfigFactory.kt` | app 設定から mqvpn config への変換 |
+| `app/src/main/java/com/mqvpn/sdk/` | mqvpn Android SDK source |
+| `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` | mqvpn native bridge |
+| `app/src/main/java/com/example/glorytun/AppUpdateManager.kt` | GitHub Releases updater |

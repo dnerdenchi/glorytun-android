@@ -19,7 +19,7 @@ object ServerChecker {
     /**
      * サーバーの到達可能性とRTTを計測する（バックグラウンドスレッドで呼ぶこと）。
      *
-     * glorytunはUDPなのでTCP接続は確立されないが、
+     * mqvpnはUDPなのでTCP接続は確立されないことがあるが、
      * 接続拒否（ECONNREFUSED）が返れば「IPには到達できる」と判定し、
      * その応答時間をRTTの目安として使う。
      */

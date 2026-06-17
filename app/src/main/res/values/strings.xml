@@ -32,9 +32,10 @@
     <string name="profile_edit">プロファイルを編集</string>
     <string name="profile_delete">プロファイルを削除</string>
     <string name="profile_update">プロファイルを更新</string>
-    <string name="server_ip">サーバー IP</string>
+    <string name="server_ip">サーバーアドレス</string>
     <string name="server_port">ポート番号</string>
-    <string name="secret_key">シークレットキー</string>
+    <string name="secret_key">mqvpn 認証キー</string>
+    <string name="allow_insecure_certificate">自己署名証明書を許可する</string>
     <string name="profile_name">プロファイル名</string>
     <string name="security_note">設定はデバイスのハードウェアセキュリティモジュール(HSM)を使用してローカルで暗号化されます</string>
 </resources>

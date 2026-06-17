@@ -30,7 +30,7 @@
         </activity>
 
         <service
-            android:name=".GlorytunVpnService"
+            android:name=".MqvpnBondingService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="connectedDevice"
             android:exported="false">

@@ -2,6 +2,7 @@ package com.example.glorytun
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 
 object ConnectionController {
     fun isProxyModeEnabled(context: Context): Boolean {
@@ -9,13 +10,20 @@ object ConnectionController {
             .getBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, false)
     }
 
-    fun startVpn(context: Context, ip: String, port: String, secret: String) {
+    fun startVpn(
+        context: Context,
+        ip: String,
+        port: String,
+        secret: String,
+        allowInsecureCertificate: Boolean = MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
+    ) {
         stopProxy(context)
-        context.startService(Intent(context, GlorytunVpnService::class.java).apply {
+        ContextCompat.startForegroundService(context, Intent(context, MqvpnBondingService::class.java).apply {
             action = GlorytunConstants.ACTION_CONNECT
-            putExtra("IP", ip)
-            putExtra("PORT", port)
-            putExtra("SECRET", secret)
+            putExtra(MqvpnConfigFactory.EXTRA_SERVER_ADDRESS, ip)
+            putExtra(MqvpnConfigFactory.EXTRA_SERVER_PORT, port)
+            putExtra(MqvpnConfigFactory.EXTRA_AUTH_KEY, secret)
+            putExtra(MqvpnConfigFactory.EXTRA_ALLOW_INSECURE, allowInsecureCertificate)
         })
     }
 
@@ -35,7 +43,7 @@ object ConnectionController {
     }
 
     private fun stopVpn(context: Context) {
-        context.startService(Intent(context, GlorytunVpnService::class.java).apply {
+        context.startService(Intent(context, MqvpnBondingService::class.java).apply {
             action = GlorytunConstants.ACTION_DISCONNECT
         })
     }

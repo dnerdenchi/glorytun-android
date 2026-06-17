@@ -49,6 +49,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="@string/secret_key"
+        android:layout_marginBottom="8dp"
         app:passwordToggleEnabled="true"
         style="@style/Widget.Material3.TextInputLayout.FilledBox">
         <com.google.android.material.textfield.TextInputEditText
@@ -57,5 +58,15 @@
             android:layout_height="wrap_content"
             android:inputType="textPassword" />
     </com.google.android.material.textfield.TextInputLayout>
+
+    <CheckBox
+        android:id="@+id/check_allow_insecure_certificate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:buttonTint="@color/primary"
+        android:checked="true"
+        android:text="@string/allow_insecure_certificate"
+        android:textColor="@color/on_surface"
+        android:textSize="13sp" />
 
 </LinearLayout>

@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -84,7 +85,7 @@ class BondingFragment : Fragment() {
 
         // サーバー情報の監視
         viewModel.serverIp.observe(viewLifecycleOwner) { ip ->
-            val port = viewModel.serverPort.value ?: "5000"
+            val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
             tvActiveServer.text = if (ip.isNotEmpty()) "$ip:$port" else "サーバー: 未設定"
         }
 
@@ -235,7 +236,18 @@ class BondingFragment : Fragment() {
     }
 
     private fun connectWithProfile(profile: VpnProfile) {
-        ConnectionController.startVpn(requireContext(), profile.ip, profile.port, profile.secret)
+        if (profile.secret.isBlank()) {
+            Toast.makeText(requireContext(), "mqvpn 認証キーを入力してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        ConnectionController.startVpn(
+            requireContext(),
+            profile.ip,
+            profile.port,
+            profile.secret,
+            profile.allowInsecureCertificate
+        )
         viewModel.connectionState.value = ConnectionStates.VPN_CONNECTING
     }
 
@@ -252,8 +264,7 @@ class BondingFragment : Fragment() {
     /**
      * バックグラウンドスレッドでサーバー疎通確認を実行し、結果をUIに反映する。
      * TCPポートに接続を試みて応答時間（RTT目安）を計測する。
-     * glorytunはUDPなのでTCP接続は確立されないが、接続拒否（ECONNREFUSED）が
-     * 返れば「到達可能」と判定し、その応答時間をレイテンシの目安として表示する。
+     * mqvpnはUDPを使うため、ここで確認できるのはサーバー到達性の目安だけ。
      */
     private fun runServerCheck(profile: VpnProfile, btnCheck: Button, tvStatus: TextView) {
         btnCheck.isEnabled = false
@@ -261,7 +272,7 @@ class BondingFragment : Fragment() {
         tvStatus.setTextColor(resources.getColor(R.color.on_surface_variant, null))
         tvStatus.text = "確認中…"
 
-        val port = profile.port.toIntOrNull() ?: 5000
+        val port = profile.port.toIntOrNull() ?: MqvpnConfigFactory.DEFAULT_PORT.toInt()
         Thread {
             val result = ServerChecker.check(profile.ip, port, timeoutMs = 5000)
             val entry = ServerCheckEntry(
@@ -333,12 +344,17 @@ class BondingFragment : Fragment() {
         val editIp = dialogView.findViewById<TextInputEditText>(R.id.edit_profile_ip)
         val editPort = dialogView.findViewById<TextInputEditText>(R.id.edit_profile_port)
         val editSecret = dialogView.findViewById<TextInputEditText>(R.id.edit_profile_secret)
+        val checkAllowInsecure = dialogView.findViewById<CheckBox>(R.id.check_allow_insecure_certificate)
 
         if (existingProfile != null) {
             editName.setText(existingProfile.name)
             editIp.setText(existingProfile.ip)
             editPort.setText(existingProfile.port)
             editSecret.setText(existingProfile.secret)
+            checkAllowInsecure.isChecked = existingProfile.allowInsecureCertificate
+        } else {
+            editPort.setText(MqvpnConfigFactory.DEFAULT_PORT)
+            checkAllowInsecure.isChecked = MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
         }
 
         val title = if (existingProfile == null) "プロファイルを追加" else "プロファイルを編集"
@@ -350,20 +366,40 @@ class BondingFragment : Fragment() {
             .setPositiveButton(positiveText) { _, _ ->
                 val name = editName.text.toString().trim().ifEmpty { "プロファイル" }
                 val ip = editIp.text.toString().trim()
-                val port = editPort.text.toString().trim().ifEmpty { "5000" }
+                val port = editPort.text.toString().trim().ifEmpty { MqvpnConfigFactory.DEFAULT_PORT }
                 val secret = editSecret.text.toString()
+                val allowInsecure = checkAllowInsecure.isChecked
 
                 if (ip.isEmpty()) {
-                    Toast.makeText(requireContext(), "サーバー IP を入力してください", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "サーバーアドレスを入力してください", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                if (secret.isBlank()) {
+                    Toast.makeText(requireContext(), "mqvpn 認証キーを入力してください", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
 
                 if (existingProfile == null) {
-                    profiles.add(VpnProfile(name = name, ip = ip, port = port, secret = secret))
+                    profiles.add(
+                        VpnProfile(
+                            name = name,
+                            ip = ip,
+                            port = port,
+                            secret = secret,
+                            allowInsecureCertificate = allowInsecure
+                        )
+                    )
                 } else {
                     val idx = profiles.indexOfFirst { it.id == existingProfile.id }
                     if (idx >= 0) {
-                        profiles[idx] = existingProfile.copy(name = name, ip = ip, port = port, secret = secret)
+                        profiles[idx] = existingProfile.copy(
+                            name = name,
+                            ip = ip,
+                            port = port,
+                            secret = secret,
+                            allowInsecureCertificate = allowInsecure
+                        )
                         // アクティブプロファイルが更新された場合はViewModelにも反映
                         if (existingProfile.id == activeProfileId) {
                             (activity as? MainActivity)?.loadProfile(profiles[idx])

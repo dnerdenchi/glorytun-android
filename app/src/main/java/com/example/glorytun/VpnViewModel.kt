@@ -22,7 +22,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 永続化された時間単位の通信量履歴（アプリ起動時にファイルからロード）。
-     * GlorytunVpnService が1時間ごとに集計・保存したデータ。
+     * MqvpnBondingService が1時間ごとに集計・保存したデータ。
      */
     val historicalPoints = mutableListOf<TrafficPoint>()
 
@@ -63,7 +63,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     // サーバー設定
     val serverIp = MutableLiveData("")
-    val serverPort = MutableLiveData("5000")
+    val serverPort = MutableLiveData(MqvpnConfigFactory.DEFAULT_PORT)
 
     /** profileId → 最後の応答確認結果（ページ遷移を跨いで保持） */
     val serverCheckCache = mutableMapOf<String, ServerCheckEntry>()

@@ -7,5 +7,6 @@ data class VpnProfile(
     val name: String,
     val ip: String,
     val port: String,
-    val secret: String
+    val secret: String,
+    val allowInsecureCertificate: Boolean = MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
 )

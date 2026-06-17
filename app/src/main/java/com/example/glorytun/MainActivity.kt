@@ -134,7 +134,8 @@ class MainActivity : AppCompatActivity() {
 
         // 旧設定が存在する場合はプロファイルに移行
         val legacyIp = prefs.getString("IP", "") ?: ""
-        val legacyPort = prefs.getString("PORT", "5000") ?: "5000"
+        val legacyPort = prefs.getString("PORT", MqvpnConfigFactory.DEFAULT_PORT)
+            ?: MqvpnConfigFactory.DEFAULT_PORT
         val legacySecret = prefs.getString("SECRET", "") ?: ""
         val repo = ProfileRepository(this)
         repo.migrateFromLegacy(legacyIp, legacyPort, legacySecret)
@@ -182,7 +183,7 @@ class MainActivity : AppCompatActivity() {
         handler.post(zeroDataRunnable)
 
         // サービスが既に起動中の場合に接続状態を取得する
-        startService(Intent(this, GlorytunVpnService::class.java).apply {
+        startService(Intent(this, MqvpnBondingService::class.java).apply {
             action = GlorytunConstants.ACTION_QUERY_STATE
         })
         startService(Intent(this, AdGuardProxyService::class.java).apply {
@@ -245,6 +246,7 @@ class MainActivity : AppCompatActivity() {
             .putString("IP", ip)
             .putString("PORT", port)
             .putString("SECRET", secret)
+            .putBoolean("ALLOW_INSECURE_CERTIFICATE", MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE)
             .apply()
         viewModel.serverIp.value = ip
         viewModel.serverPort.value = port
@@ -252,12 +254,19 @@ class MainActivity : AppCompatActivity() {
 
     fun getSecret(): String = prefs.getString("SECRET", "") ?: ""
 
+    fun getAllowInsecureCertificate(): Boolean =
+        prefs.getBoolean(
+            "ALLOW_INSECURE_CERTIFICATE",
+            MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
+        )
+
     /** プロファイルをアクティブ設定として読み込む */
     fun loadProfile(profile: VpnProfile) {
         prefs.edit()
             .putString("IP", profile.ip)
             .putString("PORT", profile.port)
             .putString("SECRET", profile.secret)
+            .putBoolean("ALLOW_INSECURE_CERTIFICATE", profile.allowInsecureCertificate)
             .apply()
         viewModel.serverIp.value = profile.ip
         viewModel.serverPort.value = profile.port

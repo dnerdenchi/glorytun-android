@@ -197,15 +197,27 @@ class DashboardFragment : Fragment() {
 
     private fun startVpnConnection() {
         val ip = viewModel.serverIp.value ?: ""
-        val port = viewModel.serverPort.value ?: "5000"
+        val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
         val secret = (activity as? MainActivity)?.getSecret() ?: ""
 
         if (ip.isEmpty()) {
-            Toast.makeText(requireContext(), "サーバー IP を設定してください", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "サーバーアドレスを設定してください", Toast.LENGTH_SHORT).show()
             return
         }
 
-        ConnectionController.startVpn(requireContext(), ip, port, secret)
+        if (secret.isBlank()) {
+            Toast.makeText(requireContext(), "mqvpn 認証キーを設定してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        ConnectionController.startVpn(
+            requireContext(),
+            ip,
+            port,
+            secret,
+            (activity as? MainActivity)?.getAllowInsecureCertificate()
+                ?: MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
+        )
         viewModel.connectionState.value = ConnectionStates.VPN_CONNECTING
     }
 
@@ -225,7 +237,7 @@ class DashboardFragment : Fragment() {
                 .getInt(GlorytunConstants.KEY_ADGUARD_PROXY_PORT, GlorytunConstants.DEFAULT_ADGUARD_PROXY_PORT)
             tvServerInfo.text = "AdGuard: 127.0.0.1:$port"
         } else {
-            val port = viewModel.serverPort.value ?: "5000"
+            val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
             tvServerInfo.text = if (ip.isNotEmpty()) "$ip:$port" else "サーバー: 未設定"
         }
     }

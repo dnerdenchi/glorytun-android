@@ -18,8 +18,8 @@ object GlorytunConstants {
 
     // --- Notification ---
     const val NOTIFICATION_ID = 1
-    const val CHANNEL_ID = "glorytun_vpn_channel"
-    const val CHANNEL_NAME = "Glorytun VPN"
+    const val CHANNEL_ID = "bondvpn_mqvpn_channel"
+    const val CHANNEL_NAME = "BondVPN"
 
     // --- Conversions ---
     /** 1 Mbps = 125,000 bytes/s */
@@ -30,9 +30,6 @@ object GlorytunConstants {
     const val MILLIS_IN_HOUR = 3_600_000L
     const val MILLIS_IN_MINUTE = 60_000L
     
-    /** 10 MB/s default rate in glorytun */
-    const val DEFAULT_MAX_RATE_BYTES_PER_SEC = 10_000_000L
-
     // --- Shared Preferences ---
     const val PREFS_NETWORK_PROTOCOL = "network_protocol_prefs"
     const val PREFS_BANDWIDTH = "bandwidth_prefs"
