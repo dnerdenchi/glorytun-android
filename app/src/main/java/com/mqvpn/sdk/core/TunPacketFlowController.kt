@@ -18,10 +18,14 @@ internal class TunPacketFlowController(
 
                 val (frame, length) = frames[nextFrame]
                 val result = sendPacket(frame, length)
+                if (result == MqvpnTunnel.ERR_AGAIN) {
+                    // The native queue did not accept this frame; retain it for retry.
+                    backpressured = true
+                    continue
+                }
+
                 releaseFrame(frame)
                 nextFrame++
-
-                backpressured = result == MqvpnTunnel.ERR_AGAIN
             }
         } finally {
             while (nextFrame < frames.size) {

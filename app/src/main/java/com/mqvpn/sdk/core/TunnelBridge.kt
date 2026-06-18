@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Uplink (TUN → libmqvpn):
  *   TUN reader (IO) → frameChannel → sender (Default) → coalesce batch
- *   → executor.enqueue { onTunPacket() × N }
+ *   → executor.call { onTunPacket() }
  *
  * Downlink (libmqvpn → TUN):
  *   Direct write(tun_fd) from C tun_output callback — no Kotlin involvement.
