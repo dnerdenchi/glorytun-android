@@ -14,6 +14,7 @@ object MqvpnConfigFactory {
     const val DEFAULT_PORT = "443"
     const val DEFAULT_SCHEDULER = "WLB"
     const val DEFAULT_ALLOW_INSECURE = true
+    const val DEFAULT_KILL_SWITCH = true
 
     fun fromIntent(context: Context, intent: Intent): MqvpnConfig {
         val schedulerName = intent.getStringExtra(EXTRA_SCHEDULER)
@@ -32,7 +33,8 @@ object MqvpnConfigFactory {
         serverPort: String,
         authKey: String,
         allowInsecure: Boolean = DEFAULT_ALLOW_INSECURE,
-        schedulerName: String = DEFAULT_SCHEDULER
+        schedulerName: String = DEFAULT_SCHEDULER,
+        killSwitch: Boolean = DEFAULT_KILL_SWITCH
     ): MqvpnConfig {
         val address = serverAddress.trim()
         require(address.isNotEmpty()) { "サーバーアドレスが未設定です" }
@@ -50,7 +52,7 @@ object MqvpnConfigFactory {
             logLevel = MqvpnConfig.LogLevel.INFO,
             reconnect = true,
             reconnectIntervalSec = 5,
-            killSwitch = false,
+            killSwitch = killSwitch,
             dnsServers = listOf(
                 GlorytunConstants.DEFAULT_DNS_PRIMARY,
                 GlorytunConstants.DEFAULT_DNS_SECONDARY
