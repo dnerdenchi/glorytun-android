@@ -48,7 +48,9 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val clientExecutor: ExecutorService = Executors.newCachedThreadPool()
     private val statsHandler = Handler(Looper.getMainLooper())
     private val sourcePort = AtomicInteger(FIRST_EPHEMERAL_PORT)
+    private val udpIpId = AtomicInteger((System.nanoTime() and 0xffff).toInt())
     private val connections = ConcurrentHashMap<TcpTunnelKey, ProxyTcpTunnelConnection>()
+    private val udpAssociations = ConcurrentHashMap<UdpTunnelKey, ProxyUdpTunnelAssociation>()
     private val pathTrafficAccumulator = PathTrafficAccumulator()
 
     @Volatile private var serverSocket: ServerSocket? = null
@@ -274,7 +276,7 @@ class AdGuardProxyService : MqvpnVpnService() {
         val command = readRequiredByte(clientIn)
         readRequiredByte(clientIn)
         val addressType = readRequiredByte(clientIn)
-        if (requestVersion != SOCKS5_VERSION || command != SOCKS5_CONNECT) {
+        if (requestVersion != SOCKS5_VERSION) {
             sendSocks5Reply(client.getOutputStream(), SOCKS5_COMMAND_NOT_SUPPORTED)
             return
         }
@@ -289,8 +291,8 @@ class AdGuardProxyService : MqvpnVpnService() {
                 String(readRequiredBytes(clientIn, length), StandardCharsets.UTF_8)
             }
             SOCKS5_IPV6 -> {
-                sendSocks5Reply(client.getOutputStream(), SOCKS5_ADDRESS_NOT_SUPPORTED)
-                return
+                readRequiredBytes(clientIn, 16)
+                null
             }
             else -> {
                 sendSocks5Reply(client.getOutputStream(), SOCKS5_ADDRESS_NOT_SUPPORTED)
@@ -298,6 +300,21 @@ class AdGuardProxyService : MqvpnVpnService() {
             }
         }
         val port = readPort(clientIn)
+
+        if (command == SOCKS5_UDP_ASSOCIATE) {
+            handleUdpAssociate(client, clientIn)
+            return
+        }
+
+        if (command != SOCKS5_CONNECT) {
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_COMMAND_NOT_SUPPORTED)
+            return
+        }
+
+        if (host == null) {
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_ADDRESS_NOT_SUPPORTED)
+            return
+        }
 
         val connection = openTunnelConnection(host, port, client.getOutputStream())
         if (connection == null) {
@@ -313,6 +330,41 @@ class AdGuardProxyService : MqvpnVpnService() {
 
         sendSocks5Reply(client.getOutputStream(), SOCKS5_SUCCEEDED)
         connection.relayFrom(clientIn)
+    }
+
+    private fun handleUdpAssociate(client: Socket, clientIn: InputStream) {
+        val local = localAddress
+        if (local == null) {
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
+            return
+        }
+
+        val association = try {
+            ProxyUdpTunnelAssociation(
+                socket = ProxyUdpTunnelAssociation.bindLoopback(),
+                localAddress = local,
+                mtu = tunnelMtu,
+                sourcePort = sourcePort,
+                ipId = udpIpId,
+                resolveIpv4 = { host -> resolveIpv4(host) },
+                packetSender = { packet -> sendTunPacket(packet) },
+                registerAssociation = { key, assoc -> udpAssociations[key] = assoc },
+                unregisterAssociation = { key -> udpAssociations.remove(key) }
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "UDP associate bind failed: ${e.message}")
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
+            return
+        }
+
+        association.start()
+        sendSocks5Reply(
+            output = client.getOutputStream(),
+            status = SOCKS5_SUCCEEDED,
+            boundAddress = InetAddress.getByName(LOOPBACK_HOST).address,
+            boundPort = association.localUdpPort
+        )
+        association.waitForControlClose(clientIn)
     }
 
     private fun handleHttpConnect(client: Socket, clientIn: PushbackInputStream) {
@@ -415,17 +467,30 @@ class AdGuardProxyService : MqvpnVpnService() {
     }
 
     private fun handleDownlinkPacket(packet: ByteArray) {
-        val tcp = Ipv4TcpCodec.parse(packet) ?: return
         val local = localAddress ?: return
-        if (tcp.destinationAddress != local) return
 
-        val remoteHost = tcp.sourceAddress.hostAddress ?: return
-        val key = TcpTunnelKey(
-            localPort = tcp.destinationPort,
+        val tcp = Ipv4TcpCodec.parse(packet)
+        if (tcp != null) {
+            if (tcp.destinationAddress != local) return
+            val remoteHost = tcp.sourceAddress.hostAddress ?: return
+            val key = TcpTunnelKey(
+                localPort = tcp.destinationPort,
+                remoteAddress = remoteHost,
+                remotePort = tcp.sourcePort
+            )
+            connections[key]?.handlePacket(tcp)
+            return
+        }
+
+        val udp = Ipv4UdpCodec.parse(packet) ?: return
+        if (udp.destinationAddress != local) return
+        val remoteHost = udp.sourceAddress.hostAddress ?: return
+        val udpKey = UdpTunnelKey(
+            localPort = udp.destinationPort,
             remoteAddress = remoteHost,
-            remotePort = tcp.sourcePort
+            remotePort = udp.sourcePort
         )
-        connections[key]?.handlePacket(tcp)
+        udpAssociations[udpKey]?.sendToClient(udp)
     }
 
     private fun readFully(input: InputStream, buffer: ByteArray, offset: Int, length: Int): Boolean {
@@ -455,6 +520,8 @@ class AdGuardProxyService : MqvpnVpnService() {
     private fun closeConnections() {
         connections.values.forEach { it.close() }
         connections.clear()
+        udpAssociations.values.toSet().forEach { it.close() }
+        udpAssociations.clear()
     }
 
     private fun closeDownlinkPipe() {
@@ -621,8 +688,21 @@ class AdGuardProxyService : MqvpnVpnService() {
         return bytes
     }
 
-    private fun sendSocks5Reply(output: OutputStream, status: Int) {
-        output.write(byteArrayOf(SOCKS5_VERSION.toByte(), status.toByte(), 0x00, SOCKS5_IPV4.toByte(), 0, 0, 0, 0, 0, 0))
+    private fun sendSocks5Reply(
+        output: OutputStream,
+        status: Int,
+        boundAddress: ByteArray = byteArrayOf(0, 0, 0, 0),
+        boundPort: Int = 0
+    ) {
+        val reply = ByteArray(10)
+        reply[0] = SOCKS5_VERSION.toByte()
+        reply[1] = status.toByte()
+        reply[2] = 0x00
+        reply[3] = SOCKS5_IPV4.toByte()
+        boundAddress.copyInto(reply, 4, 0, 4)
+        reply[8] = ((boundPort ushr 8) and 0xff).toByte()
+        reply[9] = (boundPort and 0xff).toByte()
+        output.write(reply)
     }
 
     private fun closeQuietly(closeable: Closeable?) {
@@ -655,6 +735,7 @@ class AdGuardProxyService : MqvpnVpnService() {
 
         private const val SOCKS5_VERSION = 0x05
         private const val SOCKS5_CONNECT = 0x01
+        private const val SOCKS5_UDP_ASSOCIATE = 0x03
         private const val SOCKS5_SUCCEEDED = 0x00
         private const val SOCKS5_NETWORK_UNREACHABLE = 0x03
         private const val SOCKS5_COMMAND_NOT_SUPPORTED = 0x07
