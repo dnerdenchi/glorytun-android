@@ -210,9 +210,12 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
         currentTunPfd?.close()
         currentTunPfd = tunPfd
 
-        tunnelBridge = TunnelBridge(executor, tunnel!!)
-        tunnelBridge?.startTunReader(tunPfd, mtu, scope)
-        tunnelBridge?.startSender(scope)
+        onTunFdReady(tunPfd, mtu)
+        if (useDefaultTunnelIo()) {
+            tunnelBridge = TunnelBridge(executor, tunnel!!)
+            tunnelBridge?.startTunReader(tunPfd, mtu, scope)
+            tunnelBridge?.startSender(scope)
+        }
 
         emitState(MqvpnState.Connected(info))
     }
@@ -275,6 +278,21 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     open fun onReconnectScheduled(delaySec: Int) {}
     open fun onStatsUpdated(stats: VpnStats) {}
     open fun onPathsUpdated(paths: List<PathInfo>) {}
+
+    /**
+     * Subclasses that do not use an Android TUN fd can provide their own
+     * packet I/O and feed packets with [sendTunPacket].
+     */
+    protected open fun useDefaultTunnelIo(): Boolean = true
+
+    protected open fun onTunFdReady(tunPfd: ParcelFileDescriptor, mtu: Int) {}
+
+    protected fun sendTunPacket(packet: ByteArray, length: Int = packet.size) {
+        val frame = if (length == packet.size) packet.copyOf() else packet.copyOf(length)
+        executor.enqueue {
+            tunnel?.onTunPacket(frame, 0, frame.size)
+        }
+    }
 
     // --- Helpers ---
 

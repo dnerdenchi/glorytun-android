@@ -222,7 +222,28 @@ class DashboardFragment : Fragment() {
     }
 
     private fun startProxyConnection() {
-        ConnectionController.startProxy(requireContext())
+        val ip = viewModel.serverIp.value ?: ""
+        val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
+        val secret = (activity as? MainActivity)?.getSecret() ?: ""
+
+        if (ip.isEmpty()) {
+            Toast.makeText(requireContext(), "サーバーアドレスを設定してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (secret.isBlank()) {
+            Toast.makeText(requireContext(), "mqvpn 認証キーを設定してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        ConnectionController.startProxy(
+            requireContext(),
+            ip,
+            port,
+            secret,
+            (activity as? MainActivity)?.getAllowInsecureCertificate()
+                ?: MqvpnConfigFactory.DEFAULT_ALLOW_INSECURE
+        )
         viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
     }
 

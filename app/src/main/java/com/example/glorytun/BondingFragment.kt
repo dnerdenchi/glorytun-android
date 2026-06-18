@@ -100,15 +100,17 @@ class BondingFragment : Fragment() {
             }
             if (ConnectionStates.isConnectedOrConnecting(state)) {
                 disconnectActiveConnection(state)
-            } else if (ConnectionController.isProxyModeEnabled(requireContext())) {
-                startProxyConnection()
             } else {
                 val activeProfile = profiles.find { it.id == activeProfileId }
                 if (activeProfile == null) {
                     Toast.makeText(requireContext(), "プロファイルを選択してください", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                requestVpnAndConnect(activeProfile)
+                if (ConnectionController.isProxyModeEnabled(requireContext())) {
+                    startProxyConnection(activeProfile)
+                } else {
+                    requestVpnAndConnect(activeProfile)
+                }
             }
         }
 
@@ -219,7 +221,7 @@ class BondingFragment : Fragment() {
         }
 
         if (ConnectionController.isProxyModeEnabled(requireContext())) {
-            startProxyConnection()
+            startProxyConnection(profile)
         } else {
             requestVpnAndConnect(profile)
         }
@@ -251,8 +253,19 @@ class BondingFragment : Fragment() {
         viewModel.connectionState.value = ConnectionStates.VPN_CONNECTING
     }
 
-    private fun startProxyConnection() {
-        ConnectionController.startProxy(requireContext())
+    private fun startProxyConnection(profile: VpnProfile) {
+        if (profile.secret.isBlank()) {
+            Toast.makeText(requireContext(), "mqvpn 認証キーを入力してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        ConnectionController.startProxy(
+            requireContext(),
+            profile.ip,
+            profile.port,
+            profile.secret,
+            profile.allowInsecureCertificate
+        )
         viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
     }
 

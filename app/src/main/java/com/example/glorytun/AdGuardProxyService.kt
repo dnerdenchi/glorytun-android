@@ -3,143 +3,216 @@ package com.example.glorytun
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.net.VpnService
 import android.os.Build
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.mqvpn.sdk.core.MqvpnVpnService
+import com.mqvpn.sdk.core.model.MqvpnConfig
+import com.mqvpn.sdk.core.model.MqvpnState
+import com.mqvpn.sdk.core.model.PathInfo
+import com.mqvpn.sdk.core.model.TunnelInfo
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.PushbackInputStream
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 
-class AdGuardProxyService : VpnService() {
-
-    private data class SelectedNetwork(
-        val network: Network,
-        val kind: NetworkKind
-    )
-
-    private enum class NetworkKind { WIFI, SIM }
+class AdGuardProxyService : MqvpnVpnService() {
 
     private data class ProxyTarget(
         val host: String,
         val port: Int
     )
 
-    private lateinit var connectivityManager: ConnectivityManager
-
     private val isRunning = AtomicBoolean(false)
     private val acceptExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val clientExecutor: ExecutorService = Executors.newCachedThreadPool()
     private val statsHandler = Handler(Looper.getMainLooper())
-    private val wifiNetwork = AtomicReference<Network?>(null)
-    private val simNetwork = AtomicReference<Network?>(null)
-    private val wifiTxBytes = AtomicLong(0L)
-    private val wifiRxBytes = AtomicLong(0L)
-    private val simTxBytes = AtomicLong(0L)
-    private val simRxBytes = AtomicLong(0L)
+    private val sourcePort = AtomicInteger(FIRST_EPHEMERAL_PORT)
+    private val connections = ConcurrentHashMap<TcpTunnelKey, ProxyTcpTunnelConnection>()
+    private val pathTrafficAccumulator = PathTrafficAccumulator()
 
     @Volatile private var serverSocket: ServerSocket? = null
-    @Volatile private var lastBondingPickWifi = false
-
-    private val wifiCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            wifiNetwork.set(network)
-            Log.i(TAG, "WiFi proxy path available: ${network.networkHandle}")
-        }
-
-        override fun onLost(network: Network) {
-            wifiNetwork.compareAndSet(network, null)
-            Log.i(TAG, "WiFi proxy path lost: ${network.networkHandle}")
-        }
-    }
-
-    private val simCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            simNetwork.set(network)
-            Log.i(TAG, "SIM proxy path available: ${network.networkHandle}")
-        }
-
-        override fun onLost(network: Network) {
-            simNetwork.compareAndSet(network, null)
-            Log.i(TAG, "SIM proxy path lost: ${network.networkHandle}")
-        }
-    }
+    @Volatile private var localAddress: Inet4Address? = null
+    @Volatile private var downlinkReadPfd: ParcelFileDescriptor? = null
+    @Volatile private var downlinkReader: Thread? = null
+    @Volatile private var tunnelMtu: Int = GlorytunConstants.DEFAULT_MTU
+    @Volatile private var latestPaths: List<PathInfo> = emptyList()
+    @Volatile private var dailyWifiKB = 0.0
+    @Volatile private var dailySimKB = 0.0
 
     private val statsRunnable = object : Runnable {
         override fun run() {
             if (!isRunning.get()) return
-            broadcastTrafficStats()
+            val trafficUpdate = pathTrafficAccumulator.update(latestPaths)
+            dailyWifiKB += trafficUpdate.wifiDeltaKB
+            dailySimKB += trafficUpdate.simDeltaKB
+            broadcastTrafficStats(trafficUpdate.totals)
             statsHandler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        return when (intent?.action) {
             GlorytunConstants.ACTION_PROXY_START -> {
-                startProxy()
-                return START_STICKY
+                startProxy(intent, startId)
+                START_STICKY
             }
             GlorytunConstants.ACTION_PROXY_STOP -> {
                 stopProxy()
-                return START_NOT_STICKY
+                START_NOT_STICKY
             }
             GlorytunConstants.ACTION_PROXY_QUERY_STATE -> {
                 if (isRunning.get()) sendProxyState() else stopSelf(startId)
+                if (isRunning.get()) START_STICKY else START_NOT_STICKY
             }
+            else -> if (isRunning.get()) START_STICKY else START_NOT_STICKY
         }
-        return if (isRunning.get()) START_STICKY else START_NOT_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun startProxy() {
+    private fun startProxy(intent: Intent, startId: Int) {
         if (!isRunning.compareAndSet(false, true)) return
 
-        val port = proxyPort()
-        startForegroundNotification(port)
-        registerNetworkCallbacks()
-        resetStats()
-        sendState(ConnectionStates.PROXY_CONNECTING)
+        val config = runCatching { MqvpnConfigFactory.fromIntent(this, intent) }
+            .getOrElse { error ->
+                Log.e(TAG, "Invalid mqvpn proxy config: ${error.message}", error)
+                isRunning.set(false)
+                sendState(ConnectionStates.DISCONNECTED)
+                stopSelf(startId)
+                return
+            }
 
+        val port = proxyPort()
+        startForegroundNotification(port, "mqvpn tunnel starting")
+        resetProxyState()
+        sendState(ConnectionStates.PROXY_CONNECTING)
+        startTunnel(config)
+    }
+
+    private fun stopProxy() {
+        if (!isRunning.getAndSet(false)) {
+            sendState(ConnectionStates.DISCONNECTED)
+            stopSelf()
+            return
+        }
+
+        closeLocalProxy()
+        closeConnections()
+        stopStats()
+        closeDownlinkPipe()
+        stopTunnel()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        sendState(ConnectionStates.DISCONNECTED)
+        stopSelf()
+    }
+
+    override fun onCreateTun(info: TunnelInfo, config: MqvpnConfig): ParcelFileDescriptor {
+        val address = InetAddress.getByName(info.assignedIp)
+        require(address is Inet4Address) { "Proxy mode requires an IPv4 mqvpn tunnel address" }
+        localAddress = address
+        tunnelMtu = info.mtu
+
+        val pipe = ParcelFileDescriptor.createPipe()
+        downlinkReadPfd = pipe[0]
+        return pipe[1]
+    }
+
+    override fun useDefaultTunnelIo(): Boolean = false
+
+    override fun onTunFdReady(tunPfd: ParcelFileDescriptor, mtu: Int) {
+        startDownlinkReader()
+    }
+
+    override fun onVpnStateChanged(newState: MqvpnState) {
+        when (newState) {
+            is MqvpnState.Connecting,
+            is MqvpnState.Reconnecting -> {
+                if (isRunning.get()) {
+                    updateNotification("mqvpn tunnel connecting")
+                    sendState(ConnectionStates.PROXY_CONNECTING)
+                }
+            }
+            is MqvpnState.Connected -> {
+                if (isRunning.get()) {
+                    updateNotification("mqvpn tunnel ready")
+                    startLocalProxy()
+                    startStats()
+                }
+            }
+            is MqvpnState.Disconnected -> {
+                if (isRunning.get()) {
+                    Log.w(TAG, "mqvpn tunnel disconnected while proxy mode was active")
+                    stopProxyAfterTunnelClosed()
+                }
+            }
+            is MqvpnState.Error -> {
+                Log.e(TAG, "mqvpn proxy tunnel error: ${newState.error.message}")
+                if (isRunning.get()) stopProxyAfterTunnelClosed()
+            }
+        }
+    }
+
+    override fun onPathsUpdated(paths: List<PathInfo>) {
+        latestPaths = paths
+    }
+
+    override fun onLog(level: Int, message: String) {
+        when (level) {
+            0 -> Log.d(TAG, message)
+            1 -> Log.i(TAG, message)
+            2 -> Log.w(TAG, message)
+            3 -> Log.e(TAG, message)
+        }
+    }
+
+    private fun stopProxyAfterTunnelClosed() {
+        isRunning.set(false)
+        closeLocalProxy()
+        closeConnections()
+        stopStats()
+        closeDownlinkPipe()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        sendState(ConnectionStates.DISCONNECTED)
+        stopSelf()
+    }
+
+    private fun startLocalProxy() {
+        if (serverSocket != null) return
+
+        val port = proxyPort()
         acceptExecutor.execute {
             try {
                 ServerSocket().use { socket ->
                     socket.reuseAddress = true
                     socket.bind(InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), port))
                     serverSocket = socket
-                    Log.i(TAG, "AdGuard proxy listening on $LOOPBACK_HOST:$port")
+                    Log.i(TAG, "AdGuard mqvpn proxy listening on $LOOPBACK_HOST:$port")
+                    updateNotification("$LOOPBACK_HOST:$port via mqvpn")
                     sendState(ConnectionStates.PROXY_CONNECTED)
-                    statsHandler.post(statsRunnable)
 
                     while (isRunning.get()) {
                         val client = try {
@@ -152,30 +225,19 @@ class AdGuardProxyService : VpnService() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Proxy start failed", e)
-                isRunning.set(false)
-                sendState(ConnectionStates.DISCONNECTED)
-                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                if (isRunning.get()) {
+                    Log.e(TAG, "Proxy listener failed", e)
+                    stopProxy()
+                }
             } finally {
                 serverSocket = null
             }
         }
     }
 
-    private fun stopProxy() {
-        if (!isRunning.getAndSet(false)) {
-            sendState(ConnectionStates.DISCONNECTED)
-            stopSelf()
-            return
-        }
+    private fun closeLocalProxy() {
         closeQuietly(serverSocket)
         serverSocket = null
-        statsHandler.removeCallbacks(statsRunnable)
-        unregisterNetworkCallbacks()
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        sendState(ConnectionStates.DISCONNECTED)
-        stopSelf()
     }
 
     private fun handleClient(client: Socket) {
@@ -227,8 +289,8 @@ class AdGuardProxyService : VpnService() {
                 String(readRequiredBytes(clientIn, length), StandardCharsets.UTF_8)
             }
             SOCKS5_IPV6 -> {
-                val bytes = readRequiredBytes(clientIn, 16)
-                InetAddress.getByAddress(bytes).hostAddress ?: return
+                sendSocks5Reply(client.getOutputStream(), SOCKS5_ADDRESS_NOT_SUPPORTED)
+                return
             }
             else -> {
                 sendSocks5Reply(client.getOutputStream(), SOCKS5_ADDRESS_NOT_SUPPORTED)
@@ -237,16 +299,20 @@ class AdGuardProxyService : VpnService() {
         }
         val port = readPort(clientIn)
 
-        val selection = selectNetwork()
-        if (selection == null) {
+        val connection = openTunnelConnection(host, port, client.getOutputStream())
+        if (connection == null) {
             sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
             return
         }
 
-        connectOutbound(selection, host, port).use { remote ->
-            sendSocks5Reply(client.getOutputStream(), SOCKS5_SUCCEEDED)
-            relay(clientIn, client.getOutputStream(), remote, selection.kind)
+        if (!connection.start()) {
+            connection.close()
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
+            return
         }
+
+        sendSocks5Reply(client.getOutputStream(), SOCKS5_SUCCEEDED)
+        connection.relayFrom(clientIn)
     }
 
     private fun handleHttpConnect(client: Socket, clientIn: PushbackInputStream) {
@@ -269,8 +335,9 @@ class AdGuardProxyService : VpnService() {
             return
         }
 
-        val selection = selectNetwork()
-        if (selection == null) {
+        val connection = openTunnelConnection(target.host, target.port, client.getOutputStream())
+        if (connection == null || !connection.start()) {
+            connection?.close()
             client.getOutputStream().write(
                 "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n"
                     .toByteArray(StandardCharsets.ISO_8859_1)
@@ -278,149 +345,145 @@ class AdGuardProxyService : VpnService() {
             return
         }
 
-        connectOutbound(selection, target.host, target.port).use { remote ->
-            client.getOutputStream().write(
-                "HTTP/1.1 200 Connection Established\r\n\r\n"
-                    .toByteArray(StandardCharsets.ISO_8859_1)
-            )
-            relay(clientIn, client.getOutputStream(), remote, selection.kind)
+        client.getOutputStream().write(
+            "HTTP/1.1 200 Connection Established\r\n\r\n"
+                .toByteArray(StandardCharsets.ISO_8859_1)
+        )
+        connection.relayFrom(clientIn)
+    }
+
+    private fun openTunnelConnection(host: String, port: Int, clientOutput: OutputStream): ProxyTcpTunnelConnection? {
+        val local = localAddress ?: return null
+        val remote = resolveIpv4(host) ?: return null
+        val key = allocateConnectionKey(remote, port) ?: return null
+
+        val connection = ProxyTcpTunnelConnection(
+            key = key,
+            localAddress = local,
+            remoteAddress = remote,
+            clientOutput = clientOutput,
+            mtu = tunnelMtu,
+            packetSender = { packet -> sendTunPacket(packet) },
+            onClosed = { closedKey -> connections.remove(closedKey) }
+        )
+        connections[key] = connection
+        return connection
+    }
+
+    private fun allocateConnectionKey(remote: Inet4Address, remotePort: Int): TcpTunnelKey? {
+        repeat(MAX_PORT_PROBES) {
+            val localPort = sourcePort.updateAndGet { current ->
+                if (current >= LAST_EPHEMERAL_PORT) FIRST_EPHEMERAL_PORT else current + 1
+            }
+            val key = TcpTunnelKey(localPort, remote.hostAddress ?: return null, remotePort)
+            if (!connections.containsKey(key)) return key
+        }
+        return null
+    }
+
+    private fun resolveIpv4(host: String): Inet4Address? {
+        return runCatching {
+            InetAddress.getAllByName(host).filterIsInstance<Inet4Address>().firstOrNull()
+        }.getOrNull()
+    }
+
+    private fun startDownlinkReader() {
+        val readPfd = downlinkReadPfd ?: return
+        downlinkReader?.interrupt()
+        downlinkReader = Thread({
+            FileInputStream(readPfd.fileDescriptor).use { input ->
+                readDownlinkPackets(input)
+            }
+        }, "mqvpn-proxy-downlink").apply {
+            isDaemon = true
+            start()
         }
     }
 
-    private fun connectOutbound(selection: SelectedNetwork, host: String, port: Int): Socket {
-        return try {
-            val socket = createProtectedSocket()
-            selection.network.bindSocket(socket)
-            socket.tcpNoDelay = true
-            socket.soTimeout = SOCKET_TIMEOUT_MS
+    private fun readDownlinkPackets(input: InputStream) {
+        val firstHeader = ByteArray(IPV4_MIN_HEADER_BYTES)
+        while (isRunning.get()) {
+            if (!readFully(input, firstHeader, 0, firstHeader.size)) break
+            val totalLength = ipTotalLength(firstHeader) ?: break
+            if (totalLength < firstHeader.size || totalLength > MAX_IP_PACKET_BYTES) break
 
-            val address = resolveHost(selection.network, host)
-            socket.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
-            socket
-        } catch (e: IOException) {
-            Log.w(TAG, "Network-bound connect failed; falling back to default socket: ${e.message}")
-            connectDefaultOutbound(host, port)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Network-bound socket failed; falling back to default socket: ${e.message}")
-            connectDefaultOutbound(host, port)
+            val packet = ByteArray(totalLength)
+            firstHeader.copyInto(packet, 0)
+            if (!readFully(input, packet, firstHeader.size, totalLength - firstHeader.size)) break
+            handleDownlinkPacket(packet)
         }
     }
 
-    private fun connectDefaultOutbound(host: String, port: Int): Socket {
-        val socket = createProtectedSocket()
-        socket.tcpNoDelay = true
-        socket.soTimeout = SOCKET_TIMEOUT_MS
-        socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-        return socket
+    private fun handleDownlinkPacket(packet: ByteArray) {
+        val tcp = Ipv4TcpCodec.parse(packet) ?: return
+        val local = localAddress ?: return
+        if (tcp.destinationAddress != local) return
+
+        val remoteHost = tcp.sourceAddress.hostAddress ?: return
+        val key = TcpTunnelKey(
+            localPort = tcp.destinationPort,
+            remoteAddress = remoteHost,
+            remotePort = tcp.sourcePort
+        )
+        connections[key]?.handlePacket(tcp)
     }
 
-    private fun createProtectedSocket(): Socket {
-        val socket = Socket()
-        if (!protect(socket)) {
-            Log.w(TAG, "VpnService.protect() returned false for outbound socket")
-        }
-        return socket
-    }
-
-    private fun resolveHost(network: Network, host: String): InetAddress {
-        return runCatching { InetAddress.getByName(host) }
-            .getOrNull()
-            ?.takeIf { host.any { char -> char.isDigit() } && !host.any { char -> char.isLetter() } }
-            ?: network.getAllByName(host).first()
-    }
-
-    private fun relay(
-        clientIn: InputStream,
-        clientOut: OutputStream,
-        remote: Socket,
-        kind: NetworkKind
-    ) {
-        val remoteIn = remote.getInputStream()
-        val remoteOut = remote.getOutputStream()
-
-        val upload = clientExecutor.submit {
-            copyAndCount(clientIn, remoteOut, kind, upload = true)
-            closeQuietly(remote)
-        }
-        val download = clientExecutor.submit {
-            copyAndCount(remoteIn, clientOut, kind, upload = false)
-            closeQuietly(remote)
-        }
-
-        runCatching { upload.get() }
-        runCatching { download.get() }
-    }
-
-    private fun copyAndCount(input: InputStream, output: OutputStream, kind: NetworkKind, upload: Boolean) {
-        val buffer = ByteArray(BUFFER_SIZE)
-        while (true) {
+    private fun readFully(input: InputStream, buffer: ByteArray, offset: Int, length: Int): Boolean {
+        var current = offset
+        val end = offset + length
+        while (current < end) {
             val read = try {
-                input.read(buffer)
+                input.read(buffer, current, end - current)
             } catch (_: IOException) {
-                break
+                return false
             }
-            if (read < 0) break
-            try {
-                output.write(buffer, 0, read)
-                output.flush()
-            } catch (_: IOException) {
-                break
-            }
-            addTraffic(kind, upload, read.toLong())
+            if (read < 0) return false
+            current += read
+        }
+        return true
+    }
+
+    private fun ipTotalLength(headerPrefix: ByteArray): Int? {
+        val version = (u8(headerPrefix[0]) ushr 4) and 0x0f
+        return when (version) {
+            4 -> u16(headerPrefix, 2)
+            6 -> IPV6_HEADER_BYTES + u16(headerPrefix, 4)
+            else -> null
         }
     }
 
-    private fun addTraffic(kind: NetworkKind, upload: Boolean, bytes: Long) {
-        when (kind) {
-            NetworkKind.WIFI -> if (upload) wifiTxBytes.addAndGet(bytes) else wifiRxBytes.addAndGet(bytes)
-            NetworkKind.SIM -> if (upload) simTxBytes.addAndGet(bytes) else simRxBytes.addAndGet(bytes)
-        }
+    private fun closeConnections() {
+        connections.values.forEach { it.close() }
+        connections.clear()
     }
 
-    private fun selectNetwork(): SelectedNetwork? {
-        val wifi = wifiNetwork.get()
-        val sim = simNetwork.get()
-        val mode = getSharedPreferences(NetworkProtocolFragment.PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(NetworkProtocolFragment.KEY_MODE, NetworkProtocolFragment.MODE_BONDING)
-
-        return when (mode) {
-            NetworkProtocolFragment.MODE_WIFI_FIRST ->
-                wifi?.let { SelectedNetwork(it, NetworkKind.WIFI) }
-                    ?: sim?.let { SelectedNetwork(it, NetworkKind.SIM) }
-            NetworkProtocolFragment.MODE_SIM_FIRST ->
-                sim?.let { SelectedNetwork(it, NetworkKind.SIM) }
-                    ?: wifi?.let { SelectedNetwork(it, NetworkKind.WIFI) }
-            else -> {
-                if (wifi != null && sim != null) {
-                    lastBondingPickWifi = !lastBondingPickWifi
-                    if (lastBondingPickWifi) SelectedNetwork(wifi, NetworkKind.WIFI)
-                    else SelectedNetwork(sim, NetworkKind.SIM)
-                } else {
-                    wifi?.let { SelectedNetwork(it, NetworkKind.WIFI) }
-                        ?: sim?.let { SelectedNetwork(it, NetworkKind.SIM) }
-                }
-            }
-        }
+    private fun closeDownlinkPipe() {
+        downlinkReader?.interrupt()
+        downlinkReader = null
+        closeQuietly(downlinkReadPfd)
+        downlinkReadPfd = null
+        localAddress = null
     }
 
-    private fun registerNetworkCallbacks() {
-        val wifiRequest = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        val simRequest = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager.requestNetwork(wifiRequest, wifiCallback)
-        connectivityManager.requestNetwork(simRequest, simCallback)
+    private fun startStats() {
+        pathTrafficAccumulator.reset()
+        dailyWifiKB = 0.0
+        dailySimKB = 0.0
+        statsHandler.removeCallbacks(statsRunnable)
+        statsHandler.post(statsRunnable)
     }
 
-    private fun unregisterNetworkCallbacks() {
-        try { connectivityManager.unregisterNetworkCallback(wifiCallback) } catch (_: Exception) {}
-        try { connectivityManager.unregisterNetworkCallback(simCallback) } catch (_: Exception) {}
-        wifiNetwork.set(null)
-        simNetwork.set(null)
+    private fun stopStats() {
+        statsHandler.removeCallbacks(statsRunnable)
+        pathTrafficAccumulator.reset()
+        latestPaths = emptyList()
+    }
+
+    private fun resetProxyState() {
+        latestPaths = emptyList()
+        dailyWifiKB = 0.0
+        dailySimKB = 0.0
+        pathTrafficAccumulator.reset()
     }
 
     private fun createNotificationChannel() {
@@ -429,29 +492,13 @@ class AdGuardProxyService : VpnService() {
                 GlorytunConstants.CHANNEL_ID,
                 GlorytunConstants.CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "AdGuard 互換プロキシの接続状態" }
+            ).apply { description = "AdGuard compatible mqvpn proxy state" }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
-    private fun startForegroundNotification(port: Int) {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = NotificationCompat.Builder(this, GlorytunConstants.CHANNEL_ID)
-            .setContentTitle("BondVPN Proxy")
-            .setContentText("$LOOPBACK_HOST:$port で待受中 - バックグラウンドで実行中")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+    private fun startForegroundNotification(port: Int, contentText: String) {
+        val notification = buildNotification("$LOOPBACK_HOST:$port - $contentText")
         ServiceCompat.startForeground(
             this,
             GlorytunConstants.NOTIFICATION_ID + 1,
@@ -460,8 +507,33 @@ class AdGuardProxyService : VpnService() {
         )
     }
 
+    private fun updateNotification(contentText: String) {
+        getSystemService(NotificationManager::class.java)
+            .notify(GlorytunConstants.NOTIFICATION_ID + 1, buildNotification(contentText))
+    }
+
+    private fun buildNotification(contentText: String) =
+        NotificationCompat.Builder(this, GlorytunConstants.CHANNEL_ID)
+            .setContentTitle("BondVPN Proxy")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
     private fun sendProxyState() {
-        sendState(if (isRunning.get()) ConnectionStates.PROXY_CONNECTED else ConnectionStates.DISCONNECTED)
+        sendState(if (serverSocket != null) ConnectionStates.PROXY_CONNECTED else ConnectionStates.PROXY_CONNECTING)
     }
 
     private fun sendState(state: String) {
@@ -472,32 +544,25 @@ class AdGuardProxyService : VpnService() {
         })
     }
 
-    private fun broadcastTrafficStats() {
+    private fun broadcastTrafficStats(totals: NetworkTrafficTotals) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
-            putExtra("wifi_tx_bytes", wifiTxBytes.get())
-            putExtra("wifi_rx_bytes", wifiRxBytes.get())
-            putExtra("wifi_active", wifiNetwork.get() != null)
-            putExtra("sim_tx_bytes", simTxBytes.get())
-            putExtra("sim_rx_bytes", simRxBytes.get())
-            putExtra("sim_active", simNetwork.get() != null)
+            putExtra("wifi_tx_bytes", totals.wifiTx)
+            putExtra("wifi_rx_bytes", totals.wifiRx)
+            putExtra("wifi_active", totals.wifiActive)
+            putExtra("sim_tx_bytes", totals.simTx)
+            putExtra("sim_rx_bytes", totals.simRx)
+            putExtra("sim_active", totals.simActive)
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_PROXY)
-            putExtra("daily_wifi_kb", (wifiTxBytes.get() + wifiRxBytes.get()) / 1024.0)
-            putExtra("daily_sim_kb", (simTxBytes.get() + simRxBytes.get()) / 1024.0)
+            putExtra("daily_wifi_kb", dailyWifiKB)
+            putExtra("daily_sim_kb", dailySimKB)
             putExtra("wifi_throttled", false)
             putExtra("sim_throttled", false)
         })
     }
 
-    private fun resetStats() {
-        wifiTxBytes.set(0L)
-        wifiRxBytes.set(0L)
-        simTxBytes.set(0L)
-        simRxBytes.set(0L)
-    }
-
     private fun proxyPort(): Int {
-        return getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
+        return getSharedPreferences(GlorytunConstants.PREFS_PROXY, MODE_PRIVATE)
             .getInt(GlorytunConstants.KEY_ADGUARD_PROXY_PORT, GlorytunConstants.DEFAULT_ADGUARD_PROXY_PORT)
             .coerceIn(1024, 65535)
     }
@@ -564,6 +629,11 @@ class AdGuardProxyService : VpnService() {
         try { closeable?.close() } catch (_: Exception) {}
     }
 
+    private fun u16(buffer: ByteArray, offset: Int): Int =
+        (u8(buffer[offset]) shl 8) or u8(buffer[offset + 1])
+
+    private fun u8(value: Byte): Int = value.toInt() and 0xff
+
     override fun onDestroy() {
         stopProxy()
         acceptExecutor.shutdownNow()
@@ -574,10 +644,14 @@ class AdGuardProxyService : VpnService() {
     companion object {
         private const val TAG = "AdGuardProxyService"
         private const val LOOPBACK_HOST = "127.0.0.1"
-        private const val CONNECT_TIMEOUT_MS = 15_000
         private const val SOCKET_TIMEOUT_MS = 120_000
-        private const val BUFFER_SIZE = 16 * 1024
         private const val MAX_HTTP_HEADER_BYTES = 16 * 1024
+        private const val IPV4_MIN_HEADER_BYTES = 20
+        private const val IPV6_HEADER_BYTES = 40
+        private const val MAX_IP_PACKET_BYTES = 65_535
+        private const val FIRST_EPHEMERAL_PORT = 20_000
+        private const val LAST_EPHEMERAL_PORT = 60_999
+        private const val MAX_PORT_PROBES = 41_000
 
         private const val SOCKS5_VERSION = 0x05
         private const val SOCKS5_CONNECT = 0x01
