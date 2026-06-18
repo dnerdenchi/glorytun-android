@@ -48,6 +48,8 @@ class ProxyTcpTunnelConnection(
     private val initialSequence = System.nanoTime() and 0x7fffffffL
     private var sendNext = initialSequence
     private var receiveNext = 0L
+    private var receiveReassembler: TcpReceiveReassembler? = null
+    private var pendingRemoteFinSequence: Long? = null
     private var established = false
     private var finSent = false
     private var remoteClosed = false
@@ -84,7 +86,7 @@ class ProxyTcpTunnelConnection(
     fun handlePacket(packet: Ipv4TcpPacket) {
         if (!active.get()) return
 
-        val payloadToWrite: ByteArray?
+        val payloadsToWrite: List<ByteArray>
         var closeAfterWrite = false
         synchronized(lock) {
             if ((packet.flags and TcpFlags.RST) != 0) {
@@ -97,7 +99,8 @@ class ProxyTcpTunnelConnection(
             }
 
             if (!established && (packet.flags and TcpFlags.SYN) != 0 && (packet.flags and TcpFlags.ACK) != 0) {
-                receiveNext = packet.sequenceNumber + 1
+                receiveNext = TcpReceiveReassembler.advance(packet.sequenceNumber, 1)
+                receiveReassembler = TcpReceiveReassembler(receiveNext, RECEIVE_WINDOW)
                 established = true
                 sendAckLocked()
                 establishedLatch.countDown()
@@ -107,32 +110,34 @@ class ProxyTcpTunnelConnection(
 
             if (!established) return
 
-            payloadToWrite = when {
-                packet.hasPayload && packet.sequenceNumber == receiveNext -> {
-                    receiveNext += packet.payload.size
-                    sendAckLocked()
-                    packet.payload
-                }
-                packet.hasPayload -> {
-                    sendAckLocked()
-                    null
-                }
-                else -> null
+            payloadsToWrite = if (packet.hasPayload) {
+                val reassembler = receiveReassembler ?: return
+                val delivered = reassembler.accept(packet.sequenceNumber, packet.payload)
+                receiveNext = reassembler.nextSequence
+                sendAckLocked()
+                delivered
+            } else {
+                emptyList()
             }
 
             if ((packet.flags and TcpFlags.FIN) != 0) {
-                if (packet.sequenceNumber + packet.payload.size == receiveNext) {
-                    receiveNext += 1
-                }
+                pendingRemoteFinSequence = TcpReceiveReassembler.advance(
+                    packet.sequenceNumber,
+                    packet.payload.size
+                )
+            }
+            if (pendingRemoteFinSequence == receiveNext) {
+                receiveNext = TcpReceiveReassembler.advance(receiveNext, 1)
+                pendingRemoteFinSequence = null
                 remoteClosed = true
                 sendAckLocked()
                 closeAfterWrite = true
             }
         }
 
-        if (payloadToWrite != null) {
+        if (payloadsToWrite.isNotEmpty()) {
             try {
-                clientOutput.write(payloadToWrite)
+                payloadsToWrite.forEach(clientOutput::write)
                 clientOutput.flush()
             } catch (_: IOException) {
                 close()
