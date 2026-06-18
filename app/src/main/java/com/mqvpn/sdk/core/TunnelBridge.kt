@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.FileDescriptor
@@ -36,6 +37,17 @@ internal class TunnelBridge(
     private val framePool = ConcurrentLinkedQueue<ByteArray>()
     private val poolSize = AtomicInteger(0)
     private val frameChannel = Channel<Pair<ByteArray, Int>>(FRAME_POOL_CAPACITY)
+    private val packetFlowController = TunPacketFlowController(
+        sendPacket = { frame, length ->
+            executor.call { tunnel.onTunPacket(frame, 0, length) }
+        },
+        isWritable = {
+            executor.call { tunnel.getInterest().tunReadable }
+        },
+        waitForNextCheck = {
+            delay(BACKPRESSURE_RETRY_MS)
+        },
+    )
 
     private var readerJob: Job? = null
     private var senderJob: Job? = null
@@ -76,23 +88,9 @@ internal class TunnelBridge(
                         }
                     }
 
-                    // Submit batch to executor
                     val frames = batch.toList()
                     batch.clear()
-                    executor.enqueue {
-                        for (i in frames.indices) {
-                            val (frame, len) = frames[i]
-                            val rc = tunnel.onTunPacket(frame, 0, len)
-                            releaseFrame(frame)
-                            if (rc == MqvpnTunnel.ERR_AGAIN) {
-                                // Backpressure: release ALL remaining frames before stop
-                                for (j in (i + 1) until frames.size) {
-                                    releaseFrame(frames[j].first)
-                                }
-                                break
-                            }
-                        }
-                    }
+                    packetFlowController.sendBatch(frames, ::releaseFrame)
                 }
             } catch (e: Exception) {
                 if (isActive) Log.w(TAG, "TUN sender stopped: ${e.message}")
@@ -129,5 +127,6 @@ internal class TunnelBridge(
         private const val TAG = "TunnelBridge"
         private const val FRAME_POOL_CAPACITY = 192
         private const val MAX_BATCH_SIZE = 64
+        private const val BACKPRESSURE_RETRY_MS = 2L
     }
 }

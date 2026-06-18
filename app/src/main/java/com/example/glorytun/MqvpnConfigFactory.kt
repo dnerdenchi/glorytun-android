@@ -12,7 +12,7 @@ object MqvpnConfigFactory {
     const val EXTRA_SCHEDULER = "SCHEDULER"
 
     const val DEFAULT_PORT = "443"
-    const val DEFAULT_SCHEDULER = "WLB"
+    const val DEFAULT_SCHEDULER = "WLB_UDP_PIN"
     const val DEFAULT_ALLOW_INSECURE = true
     const val DEFAULT_KILL_SWITCH = true
 
@@ -70,7 +70,7 @@ object MqvpnConfigFactory {
         )
 
         return when (mode) {
-            NetworkProtocolFragment.MODE_BONDING -> "WLB"
+            NetworkProtocolFragment.MODE_BONDING -> "WLB_UDP_PIN"
             else -> "MIN_RTT"
         }
     }

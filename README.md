@@ -5,7 +5,7 @@ BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mq
 ## 特徴
 
 - Android の VPN 機能を使って mqvpn トンネルへ接続します。
-- mqvpn の Multipath QUIC / WLB scheduler により、複数回線の利用を前提にしています。
+- mqvpn の Multipath QUIC / WLB UDP flow pin scheduler により、動画通信の順序を保ちながら複数回線を利用します。
 - GitHub Releases の APK asset を参照するアプリ内更新機能を備えています。
 - 現在の native bridge は `arm64-v8a` 向けです。
 
