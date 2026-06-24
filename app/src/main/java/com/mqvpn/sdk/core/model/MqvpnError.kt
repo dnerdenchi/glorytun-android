@@ -24,10 +24,15 @@ sealed interface MqvpnError {
             -4 -> TlsError("TLS handshake failed")
             -5 -> AuthFailed("PSK authentication failed")
             -6 -> ProtocolError(code, "MASQUE not supported")
+            -10 -> Timeout("Connection closed while reconnecting")
             -11 -> AbiMismatch("Callback ABI version mismatch")
             -12 -> Timeout("Connection timeout")
             -3 -> EngineError(code, "Engine error")
             else -> Unknown(code, "Error code $code")
+        }
+
+        fun isRetryableCloseCode(code: Int): Boolean {
+            return code == -10 || code == -12
         }
     }
 }

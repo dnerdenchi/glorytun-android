@@ -13,6 +13,7 @@ import com.mqvpn.sdk.core.internal.PathManager
 import com.mqvpn.sdk.core.internal.TunnelCallbacks
 import com.mqvpn.sdk.core.internal.UdpReaderPool
 import com.mqvpn.sdk.core.model.MqvpnConfig
+import com.mqvpn.sdk.core.model.MqvpnClosePolicy
 import com.mqvpn.sdk.core.model.MqvpnError
 import com.mqvpn.sdk.core.model.MqvpnState
 import com.mqvpn.sdk.core.model.PathInfo
@@ -221,9 +222,12 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     }
 
     override fun onNativeTunnelClosed(errorCode: Int) {
-        if (errorCode != 0) {
-            emitState(MqvpnState.Error(MqvpnError.fromNativeCode(errorCode)))
-        }
+        val closeState = MqvpnClosePolicy.stateForClose(
+            errorCode = errorCode,
+            reconnectEnabled = currentConfig?.reconnect == true,
+            reconnectIntervalSec = currentConfig?.reconnectIntervalSec ?: DEFAULT_RECONNECT_INTERVAL_SEC,
+        )
+        if (closeState != null) emitState(closeState)
     }
 
     override fun onNativeStateChanged(oldState: Int, newState: Int) {
@@ -304,5 +308,6 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
 
     companion object {
         private const val TAG = "MqvpnVpnService"
+        private const val DEFAULT_RECONNECT_INTERVAL_SEC = 5
     }
 }
