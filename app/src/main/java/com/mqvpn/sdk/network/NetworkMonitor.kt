@@ -12,6 +12,16 @@ import android.util.Log
 import androidx.core.content.getSystemService
 import java.util.concurrent.ConcurrentHashMap
 
+internal data class NetworkCapabilityFlags(
+    val hasInternet: Boolean,
+    val hasValidated: Boolean,
+    val hasNotVpn: Boolean,
+    val hasWifi: Boolean,
+    val hasCellular: Boolean,
+    val hasEthernet: Boolean,
+    val hasNotMetered: Boolean,
+)
+
 /**
  * Monitors WiFi / Cellular / Ethernet availability via ConnectivityManager.
  *
@@ -31,28 +41,19 @@ class NetworkMonitor(private val context: Context) {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build()
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                /* capabilities may not be available yet; wait for onCapabilitiesChanged */
+                handleCapabilities(network, cm.getNetworkCapabilities(network), listener)
             }
 
             override fun onCapabilitiesChanged(
                 network: Network,
                 capabilities: NetworkCapabilities,
             ) {
-                val type = classifyTransport(capabilities)
-                val name = networkName(network, type)
-                val metered = !capabilities.hasCapability(
-                    NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
-                )
-                val path = NetworkPath(network, type, name, metered)
-                val isNew = _activeNetworks.put(network, path) == null
-                if (isNew) {
-                    Log.d(TAG, "Available: $path")
-                    listener(NetworkEvent.Available(path))
-                }
+                handleCapabilities(network, capabilities, listener)
             }
 
             override fun onLost(network: Network) {
@@ -64,6 +65,9 @@ class NetworkMonitor(private val context: Context) {
 
         callback = cb
         cm.registerNetworkCallback(request, cb)
+        cm.allNetworks.forEach { network ->
+            handleCapabilities(network, cm.getNetworkCapabilities(network), listener)
+        }
     }
 
     /** Remove a network so the next onCapabilitiesChanged treats it as new. */
@@ -77,17 +81,63 @@ class NetworkMonitor(private val context: Context) {
         _activeNetworks.clear()
     }
 
+    private fun handleCapabilities(
+        network: Network,
+        capabilities: NetworkCapabilities?,
+        listener: (NetworkEvent) -> Unit,
+    ) {
+        val flags = capabilities?.toFlags()
+        if (flags == null || !isUsablePath(flags)) {
+            val removed = _activeNetworks.remove(network)
+            if (removed != null) {
+                Log.d(TAG, "Lost unusable path: $removed")
+                listener(NetworkEvent.Lost(removed))
+            }
+            return
+        }
+
+        val type = classifyTransport(flags)
+        val path = NetworkPath(
+            network = network,
+            type = type,
+            name = networkName(network, type),
+            isMetered = !flags.hasNotMetered,
+        )
+        val isNew = _activeNetworks.put(network, path) == null
+        if (isNew) {
+            Log.d(TAG, "Available: $path")
+            listener(NetworkEvent.Available(path))
+        }
+    }
+
     companion object {
         private const val TAG = "NetworkMonitor"
 
-        internal fun classifyTransport(caps: NetworkCapabilities): PathType = when {
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> PathType.WIFI
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> PathType.CELLULAR
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> PathType.ETHERNET
+        internal fun isUsablePath(flags: NetworkCapabilityFlags): Boolean {
+            return flags.hasInternet &&
+                flags.hasValidated &&
+                flags.hasNotVpn &&
+                (flags.hasWifi || flags.hasCellular || flags.hasEthernet)
+        }
+
+        internal fun classifyTransport(flags: NetworkCapabilityFlags): PathType = when {
+            flags.hasWifi -> PathType.WIFI
+            flags.hasCellular -> PathType.CELLULAR
+            flags.hasEthernet -> PathType.ETHERNET
             else -> PathType.OTHER
         }
 
         internal fun networkName(network: Network, type: PathType): String =
             "${type.name.lowercase()}-${network.networkHandle and 0xFFF}"
+
+        private fun NetworkCapabilities.toFlags() = NetworkCapabilityFlags(
+            hasInternet = hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+            hasValidated = hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            hasNotVpn = hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN),
+            hasWifi = hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+            hasCellular = hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            hasEthernet = hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+            hasNotMetered = hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+        )
     }
 }
