@@ -50,6 +50,9 @@ class ProxyTcpTunnelConnection(
     private var receiveNext = 0L
     private var receiveReassembler: TcpReceiveReassembler? = null
     private var pendingRemoteFinSequence: Long? = null
+    private var receiveWindowScaleNegotiated = false
+    private var remoteWindowScale = 0
+    private var remoteAdvertisedWindowBytes = LEGACY_WINDOW_BYTES.toLong()
     private var established = false
     private var finSent = false
     private var remoteClosed = false
@@ -95,12 +98,16 @@ class ProxyTcpTunnelConnection(
             }
 
             if ((packet.flags and TcpFlags.ACK) != 0) {
+                updateRemoteWindowLocked(packet)
                 removeAcknowledgedSegments(packet.acknowledgementNumber)
             }
 
             if (!established && (packet.flags and TcpFlags.SYN) != 0 && (packet.flags and TcpFlags.ACK) != 0) {
                 receiveNext = TcpReceiveReassembler.advance(packet.sequenceNumber, 1)
-                receiveReassembler = TcpReceiveReassembler(receiveNext, RECEIVE_WINDOW)
+                receiveWindowScaleNegotiated = packet.options.windowScale != null
+                remoteWindowScale = packet.options.windowScale ?: 0
+                updateRemoteWindowLocked(packet)
+                receiveReassembler = TcpReceiveReassembler(receiveNext, RECEIVE_WINDOW_BYTES)
                 established = true
                 sendAckLocked()
                 establishedLatch.countDown()
@@ -180,6 +187,7 @@ class ProxyTcpTunnelConnection(
     }
 
     private fun sendSegmentLocked(flags: Int, payload: ByteArray, track: Boolean) {
+        val isSyn = (flags and TcpFlags.SYN) != 0
         val packet = Ipv4TcpCodec.encode(
             sourceAddress = localAddress,
             destinationAddress = remoteAddress,
@@ -188,9 +196,18 @@ class ProxyTcpTunnelConnection(
             sequenceNumber = sendNext,
             acknowledgementNumber = receiveNext,
             flags = flags,
-            windowSize = RECEIVE_WINDOW,
+            windowSize = advertisedWindowField(),
             identification = ipId.incrementAndGet(),
-            payload = payload
+            payload = payload,
+            options = if (isSyn) {
+                TcpOptions(
+                    maxSegmentSize = maxSegmentSize,
+                    sackPermitted = true,
+                    windowScale = RECEIVE_WINDOW_SCALE
+                )
+            } else {
+                TcpOptions()
+            }
         )
         val sequenceLength = payload.size + if ((flags and (TcpFlags.SYN or TcpFlags.FIN)) != 0) 1 else 0
         if (track && sequenceLength > 0) {
@@ -209,14 +226,35 @@ class ProxyTcpTunnelConnection(
         if (changed) lock.notifyAll()
     }
 
+    private fun updateRemoteWindowLocked(packet: Ipv4TcpPacket) {
+        val scaledWindow = packet.windowSize.toLong() shl remoteWindowScale
+        if (scaledWindow != remoteAdvertisedWindowBytes) {
+            remoteAdvertisedWindowBytes = scaledWindow
+            lock.notifyAll()
+        }
+    }
+
     private fun waitForSendWindowLocked() {
-        while (active.get() && pendingBytesLocked() >= SEND_WINDOW_LIMIT) {
+        while (active.get() && pendingBytesLocked() >= allowedSendWindowBytesLocked()) {
             lock.wait(SEND_WINDOW_WAIT_MS)
         }
     }
 
     private fun pendingBytesLocked(): Long {
         return pendingSegments.sumOf { it.endSequence - it.startSequence }
+    }
+
+    private fun allowedSendWindowBytesLocked(): Long {
+        return min(SEND_WINDOW_LIMIT_BYTES.toLong(), remoteAdvertisedWindowBytes)
+            .coerceAtLeast(0L)
+    }
+
+    private fun advertisedWindowField(): Int {
+        return if (receiveWindowScaleNegotiated) {
+            (RECEIVE_WINDOW_BYTES shr RECEIVE_WINDOW_SCALE).coerceIn(1, LEGACY_WINDOW_BYTES)
+        } else {
+            LEGACY_WINDOW_BYTES
+        }
     }
 
     private fun retransmitLoop() {
@@ -270,8 +308,10 @@ class ProxyTcpTunnelConnection(
         private const val TAG = "ProxyTcpTunnelConnection"
         private const val IPV4_TCP_HEADER_BYTES = 40
         private const val DEFAULT_MSS = 1200
-        private const val RECEIVE_WINDOW = 65535
-        private const val SEND_WINDOW_LIMIT = 64 * 1024
+        private const val LEGACY_WINDOW_BYTES = 65_535
+        private const val RECEIVE_WINDOW_SCALE = 6
+        private const val RECEIVE_WINDOW_BYTES = 4_194_240
+        private const val SEND_WINDOW_LIMIT_BYTES = 4 * 1024 * 1024
         private const val SEND_WINDOW_WAIT_MS = 100L
         private const val CONNECT_TIMEOUT_MS = 15_000L
         private const val CLOSE_WAIT_MS = 30_000L

@@ -52,4 +52,38 @@ class Ipv4TcpCodecTest {
 
         assertEquals(null, Ipv4TcpCodec.parse(packet))
     }
+
+    @Test
+    fun encodeAndParseTcpOptionsWithPayload() {
+        val source = InetAddress.getByName("10.8.0.2") as Inet4Address
+        val destination = InetAddress.getByName("93.184.216.34") as Inet4Address
+        val payload = byteArrayOf(1, 2, 3, 4)
+
+        val encoded = Ipv4TcpCodec.encode(
+            sourceAddress = source,
+            destinationAddress = destination,
+            sourcePort = 23456,
+            destinationPort = 443,
+            sequenceNumber = 1234L,
+            acknowledgementNumber = 0L,
+            flags = TcpFlags.SYN,
+            windowSize = 65535,
+            identification = 43,
+            payload = payload,
+            options = TcpOptions(
+                maxSegmentSize = 1200,
+                sackPermitted = true,
+                windowScale = 6
+            )
+        )
+
+        val decoded = Ipv4TcpCodec.parse(encoded)
+        assertNotNull(decoded)
+        decoded!!
+        assertEquals(TcpFlags.SYN, decoded.flags)
+        assertEquals(1200, decoded.options.maxSegmentSize)
+        assertEquals(true, decoded.options.sackPermitted)
+        assertEquals(6, decoded.options.windowScale)
+        assertArrayEquals(payload, decoded.payload)
+    }
 }

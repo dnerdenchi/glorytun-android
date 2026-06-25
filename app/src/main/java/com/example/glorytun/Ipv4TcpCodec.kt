@@ -20,16 +20,28 @@ data class Ipv4TcpPacket(
     val acknowledgementNumber: Long,
     val flags: Int,
     val windowSize: Int,
-    val payload: ByteArray
+    val payload: ByteArray,
+    val options: TcpOptions = TcpOptions()
 ) {
     val hasPayload: Boolean get() = payload.isNotEmpty()
 }
+
+data class TcpOptions(
+    val maxSegmentSize: Int? = null,
+    val sackPermitted: Boolean = false,
+    val windowScale: Int? = null
+)
 
 object Ipv4TcpCodec {
     private const val IPV4_HEADER_LENGTH = 20
     private const val TCP_HEADER_LENGTH = 20
     private const val IP_PROTOCOL_TCP = 6
     private const val DEFAULT_TTL = 64
+    private const val TCP_OPTION_EOL = 0
+    private const val TCP_OPTION_NOP = 1
+    private const val TCP_OPTION_MSS = 2
+    private const val TCP_OPTION_WINDOW_SCALE = 3
+    private const val TCP_OPTION_SACK_PERMITTED = 4
 
     fun encode(
         sourceAddress: Inet4Address,
@@ -41,9 +53,12 @@ object Ipv4TcpCodec {
         flags: Int,
         windowSize: Int,
         identification: Int,
-        payload: ByteArray = ByteArray(0)
+        payload: ByteArray = ByteArray(0),
+        options: TcpOptions = TcpOptions()
     ): ByteArray {
-        val tcpLength = TCP_HEADER_LENGTH + payload.size
+        val encodedOptions = encodeOptions(options)
+        val tcpHeaderLength = TCP_HEADER_LENGTH + encodedOptions.size
+        val tcpLength = tcpHeaderLength + payload.size
         val totalLength = IPV4_HEADER_LENGTH + tcpLength
         val packet = ByteArray(totalLength)
 
@@ -63,12 +78,13 @@ object Ipv4TcpCodec {
         writeU16(packet, tcpOffset + 2, destinationPort)
         writeU32(packet, tcpOffset + 4, sequenceNumber)
         writeU32(packet, tcpOffset + 8, acknowledgementNumber)
-        packet[tcpOffset + 12] = ((TCP_HEADER_LENGTH / 4) shl 4).toByte()
+        packet[tcpOffset + 12] = ((tcpHeaderLength / 4) shl 4).toByte()
         packet[tcpOffset + 13] = (flags and 0x3f).toByte()
         writeU16(packet, tcpOffset + 14, windowSize)
         writeU16(packet, tcpOffset + 16, 0)
         writeU16(packet, tcpOffset + 18, 0)
-        payload.copyInto(packet, tcpOffset + TCP_HEADER_LENGTH)
+        encodedOptions.copyInto(packet, tcpOffset + TCP_HEADER_LENGTH)
+        payload.copyInto(packet, tcpOffset + tcpHeaderLength)
         writeU16(
             packet,
             tcpOffset + 16,
@@ -102,7 +118,8 @@ object Ipv4TcpCodec {
             acknowledgementNumber = u32(packet, tcpOffset + 8),
             flags = u8(packet[tcpOffset + 13]) and 0x3f,
             windowSize = u16(packet, tcpOffset + 14),
-            payload = if (payloadLength == 0) ByteArray(0) else packet.copyOfRange(payloadOffset, payloadOffset + payloadLength)
+            payload = if (payloadLength == 0) ByteArray(0) else packet.copyOfRange(payloadOffset, payloadOffset + payloadLength),
+            options = parseOptions(packet, tcpOffset + TCP_HEADER_LENGTH, dataOffset - TCP_HEADER_LENGTH)
         )
     }
 
@@ -130,6 +147,68 @@ object Ipv4TcpCodec {
         pseudo[12 + 16] = 0
         pseudo[12 + 17] = 0
         return checksum(pseudo, 0, pseudo.size)
+    }
+
+    private fun encodeOptions(options: TcpOptions): ByteArray {
+        val bytes = mutableListOf<Byte>()
+        options.maxSegmentSize?.let { mss ->
+            bytes += TCP_OPTION_MSS.toByte()
+            bytes += 4
+            bytes += ((mss ushr 8) and 0xff).toByte()
+            bytes += (mss and 0xff).toByte()
+        }
+        if (options.sackPermitted) {
+            bytes += TCP_OPTION_SACK_PERMITTED.toByte()
+            bytes += 2
+        }
+        options.windowScale?.let { scale ->
+            bytes += TCP_OPTION_WINDOW_SCALE.toByte()
+            bytes += 3
+            bytes += scale.coerceIn(0, 14).toByte()
+        }
+        while (bytes.size % 4 != 0) {
+            bytes += TCP_OPTION_EOL.toByte()
+        }
+        return bytes.toByteArray()
+    }
+
+    private fun parseOptions(packet: ByteArray, offset: Int, length: Int): TcpOptions {
+        var index = offset
+        val end = offset + length
+        var maxSegmentSize: Int? = null
+        var sackPermitted = false
+        var windowScale: Int? = null
+
+        while (index < end) {
+            when (val kind = u8(packet[index++])) {
+                TCP_OPTION_EOL -> break
+                TCP_OPTION_NOP -> continue
+                else -> {
+                    if (index >= end) break
+                    val optionLength = u8(packet[index++])
+                    if (optionLength < 2 || index + optionLength - 2 > end) break
+                    val dataStart = index
+                    when (kind) {
+                        TCP_OPTION_MSS -> if (optionLength == 4) {
+                            maxSegmentSize = u16(packet, dataStart)
+                        }
+                        TCP_OPTION_SACK_PERMITTED -> if (optionLength == 2) {
+                            sackPermitted = true
+                        }
+                        TCP_OPTION_WINDOW_SCALE -> if (optionLength == 3) {
+                            windowScale = u8(packet[dataStart]).coerceIn(0, 14)
+                        }
+                    }
+                    index += optionLength - 2
+                }
+            }
+        }
+
+        return TcpOptions(
+            maxSegmentSize = maxSegmentSize,
+            sackPermitted = sackPermitted,
+            windowScale = windowScale
+        )
     }
 
     private fun checksum(buffer: ByteArray, offset: Int, length: Int): Int {
