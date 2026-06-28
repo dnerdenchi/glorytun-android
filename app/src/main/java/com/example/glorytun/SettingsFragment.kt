@@ -42,6 +42,13 @@ class SettingsFragment : Fragment() {
                 .commit()
         }
 
+        view.findViewById<LinearLayout>(R.id.menu_speed_test)?.setOnClickListener {
+            parentFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, SpeedTestFragment(), "speed_test")
+                .addToBackStack("speed_test")
+                .commit()
+        }
+
         updateBandwidthSubtitle(view)
         setupUpdateControls(view)
 
