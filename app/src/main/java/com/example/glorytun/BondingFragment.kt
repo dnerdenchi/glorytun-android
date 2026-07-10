@@ -259,6 +259,18 @@ class BondingFragment : Fragment() {
             return
         }
 
+        val pairRepository = PairShareRepository(requireContext())
+        if (pairRepository.isReceivingEnabled() && pairRepository.hasReceivingPeers()) {
+            ConnectionController.startPairShareProxy(
+                requireContext(),
+                profile.ip,
+                profile.port,
+                profile.secret,
+            )
+            viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
+            return
+        }
+
         ConnectionController.startProxy(
             requireContext(),
             profile.ip,

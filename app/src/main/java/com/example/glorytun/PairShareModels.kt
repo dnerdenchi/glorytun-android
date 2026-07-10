@@ -22,9 +22,12 @@ data class PairSharePeer(
     /** Zero means unlimited. This is enforced by the sharing device. */
     val speedLimitMbps: Int = DEFAULT_SPEED_LIMIT_MBPS,
     val lastSeenMillis: Long = 0L,
+    /** Local receiving preference. Paired SIM paths are opt-in. */
+    val pathPriority: String = PairBondPathPriority.DISABLED.name,
 ) {
     companion object {
-        const val DEFAULT_SPEED_LIMIT_MBPS = 10
+        /** New PairBond paths are uncapped by default; owners can set a cap per peer. */
+        const val DEFAULT_SPEED_LIMIT_MBPS = 0
     }
 }
 
@@ -43,6 +46,20 @@ data class PairSharePending(
     val verificationWords: String,
 )
 
+/** Per-paired-device live measurements for the bonded proxy path. */
+data class PairSharePeerStats(
+    val peerId: String,
+    val status: String = "待機中",
+    val txBytes: Long = 0L,
+    val rxBytes: Long = 0L,
+    val txBytesPerSecond: Long = 0L,
+    val rxBytesPerSecond: Long = 0L,
+    val rttMillis: Int? = null,
+    val lossPermille: Int = 0,
+    val retransmissions: Long = 0L,
+    val updatedAtMillis: Long = 0L,
+)
+
 data class PairShareUiState(
     val enabled: Boolean = false,
     val serviceStatus: String = "Pair & Share は無効です",
@@ -51,6 +68,7 @@ data class PairShareUiState(
     val discovered: List<PairShareDiscovery> = emptyList(),
     val peers: List<PairSharePeer> = emptyList(),
     val pending: List<PairSharePending> = emptyList(),
+    val peerStats: Map<String, PairSharePeerStats> = emptyMap(),
 )
 
 /**
@@ -127,6 +145,7 @@ class PairShareRepository(context: Context) {
 
     fun peers(): List<PairSharePeer> {
         val raw = prefs.getString(KEY_PEERS, null) ?: return emptyList()
+        val legacyActivePeerId = activeReceivePeerId()
         return runCatching {
             val array = JSONArray(raw)
             buildList {
@@ -147,6 +166,15 @@ class PairShareRepository(context: Context) {
                                 PairSharePeer.DEFAULT_SPEED_LIMIT_MBPS,
                             ).coerceIn(0, MAX_SPEED_LIMIT_MBPS),
                             lastSeenMillis = item.optLong("lastSeenMillis", 0L),
+                            pathPriority = item.optString("pathPriority")
+                                .takeIf { value ->
+                                    PairBondPathPriority.entries.any { it.name == value }
+                                }
+                                ?: if (id == legacyActivePeerId) {
+                                    PairBondPathPriority.ACTIVE.name
+                                } else {
+                                    PairBondPathPriority.DISABLED.name
+                                },
                         ),
                     )
                 }
@@ -189,6 +217,27 @@ class PairShareRepository(context: Context) {
 
     fun activeReceivePeer(): PairSharePeer? = activeReceivePeerId()?.let(::peer)
 
+    fun receivingPeers(): List<PairSharePeer> = peers().filter {
+        PairBondPathPriority.fromStored(it.pathPriority) != PairBondPathPriority.DISABLED
+    }
+
+    fun hasReceivingPeers(): Boolean = receivingPeers().isNotEmpty()
+
+    fun pathPriority(peer: PairSharePeer): PairBondPathPriority =
+        PairBondPathPriority.fromStored(peer.pathPriority)
+
+    fun setPeerPathPriority(id: String, priority: PairBondPathPriority) {
+        val existing = peer(id) ?: return
+        upsertPeer(existing.copy(pathPriority = priority.name))
+        val activeId = activeReceivePeerId()
+        when {
+            priority != PairBondPathPriority.DISABLED && activeId == null ->
+                prefs.edit().putString(KEY_ACTIVE_RECEIVE_PEER, id).apply()
+            priority == PairBondPathPriority.DISABLED && activeId == id ->
+                prefs.edit().remove(KEY_ACTIVE_RECEIVE_PEER).apply()
+        }
+    }
+
     fun setActiveReceivePeer(id: String?) {
         val editor = prefs.edit()
         if (id == null) editor.remove(KEY_ACTIVE_RECEIVE_PEER)
@@ -208,7 +257,8 @@ class PairShareRepository(context: Context) {
                     .put("port", peer.port)
                     .put("canUseMyConnection", peer.canUseMyConnection)
                     .put("speedLimitMbps", peer.speedLimitMbps)
-                    .put("lastSeenMillis", peer.lastSeenMillis),
+                    .put("lastSeenMillis", peer.lastSeenMillis)
+                    .put("pathPriority", PairBondPathPriority.fromStored(peer.pathPriority).name),
             )
         }
         prefs.edit().putString(KEY_PEERS, array.toString()).apply()
@@ -247,28 +297,63 @@ class PairShareRepository(context: Context) {
 object PairShareCoordinator {
     private val mutableState = MutableLiveData(PairShareUiState())
     val state: LiveData<PairShareUiState> = mutableState
+    private val runtimeStats = LinkedHashMap<String, PairSharePeerStats>()
 
     @Volatile
     private var client: PairShareClient? = null
 
+    @Volatile
+    private var bondSession: PairBondSession? = null
+
     @Synchronized
-    fun openTcp(context: Context, host: String, port: Int): PairShareTcpStream {
-        return clientForActivePeer(context).openTcp(host, port)
+    fun startBonding(context: Context, config: PairBondConfig) {
+        val existing = bondSession
+        if (existing != null && existing.matches(config)) {
+            existing.refreshPaths()
+            return
+        }
+        existing?.close()
+        synchronized(runtimeStats) { runtimeStats.clear() }
+        bondSession = PairBondSession(context.applicationContext, config)
     }
 
     @Synchronized
-    fun openUdp(context: Context): PairShareUdpStream {
-        return clientForActivePeer(context).openUdp()
+    fun openTcp(context: Context, host: String, port: Int): PairShareTcpTunnel {
+        return bondedSession(context).openTcp(host, port)
+    }
+
+    @Synchronized
+    fun openUdp(context: Context): PairShareUdpTunnel {
+        return bondedSession(context).openUdp()
+    }
+
+    @Synchronized
+    fun refreshBondingPaths(context: Context) {
+        bondSession?.takeIf { it.isFor(context.applicationContext) }?.refreshPaths()
     }
 
     @Synchronized
     fun closeClient() {
         client?.close()
         client = null
+        bondSession?.close()
+        bondSession = null
+        synchronized(runtimeStats) { runtimeStats.clear() }
     }
 
     fun publish(state: PairShareUiState) {
-        mutableState.postValue(state)
+        synchronized(runtimeStats) {
+            mutableState.postValue(state.copy(peerStats = runtimeStats.toMap()))
+        }
+    }
+
+    fun updatePeerStats(stats: Collection<PairSharePeerStats>) {
+        synchronized(runtimeStats) {
+            runtimeStats.clear()
+            stats.forEach { runtimeStats[it.peerId] = it }
+            val current = mutableState.value ?: PairShareUiState()
+            mutableState.postValue(current.copy(peerStats = runtimeStats.toMap()))
+        }
     }
 
     private fun clientForActivePeer(context: Context): PairShareClient {
@@ -282,5 +367,19 @@ object PairShareCoordinator {
         if (existing != null && existing.matches(peer) && existing.isAlive()) return existing
         existing?.close()
         return PairShareClient(context.applicationContext, peer).also { client = it }
+    }
+
+    private fun bondedSession(context: Context): PairBondSession {
+        val repository = PairShareRepository(context)
+        if (!repository.isReceivingEnabled()) {
+            throw IllegalStateException("受信を有効にしてください")
+        }
+        if (!repository.hasReceivingPeers()) {
+            throw IllegalStateException("受信に使用するペア端末を1台以上追加してください")
+        }
+        val existing = bondSession
+            ?: throw IllegalStateException("PairBond リレーの接続設定がありません")
+        existing.refreshPaths()
+        return existing
     }
 }

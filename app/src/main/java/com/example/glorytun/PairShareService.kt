@@ -82,7 +82,7 @@ class PairShareService : Service() {
                 return
             }
             vpnConnected = intent.getStringExtra(GlorytunConstants.EXTRA_STATE) == ConnectionStates.VPN_CONNECTED
-            if (!vpnConnected) closeHostSessions()
+            if (!vpnConnected) closeHostVpnRelays()
             publishState()
         }
     }
@@ -146,7 +146,8 @@ class PairShareService : Service() {
                 publishState()
             }
             ACTION_QUERY -> {
-                if (!repository.isSharingEnabled() || !vpnConnected) closeHostSessions()
+                if (!repository.isSharingEnabled()) closeHostSessions()
+                else if (!vpnConnected) closeHostVpnRelays()
                 publishState()
             }
         }
@@ -263,6 +264,10 @@ class PairShareService : Service() {
     private fun closeHostSessions() {
         hostSessions.toSet().forEach { it.close() }
         hostSessions.clear()
+    }
+
+    private fun closeHostVpnRelays() {
+        hostSessions.toSet().forEach { it.closeVpnRelays() }
     }
 
     private fun registerNsdService(port: Int) {
@@ -519,8 +524,8 @@ class PairShareService : Service() {
             rejectSession(output, "ペア端末の認証に失敗しました")
             return
         }
-        if (!sharingAllowedFor(clientId)) {
-            rejectSession(output, sharingUnavailableReason(clientId))
+        if (!bondingAllowedFor(clientId)) {
+            rejectSession(output, bondingUnavailableReason(clientId))
             return
         }
 
@@ -543,6 +548,7 @@ class PairShareService : Service() {
         val sessionKey = PairShareCrypto.deriveSessionKey(pairKey, clientNonce, serverNonce)
         lateinit var session: PairShareHostSession
         session = PairShareHostSession(
+            context = this,
             socket = socket,
             codec = PairShareFrameCodec(
                 input = input,
@@ -552,6 +558,7 @@ class PairShareService : Service() {
                 outboundLabel = "host-to-client",
             ),
             sharingAllowed = { sharingAllowedFor(clientId) },
+            bondingAllowed = { bondingAllowedFor(clientId) },
             speedLimitMbps = {
                 repository.peer(clientId)?.speedLimitMbps ?: PairSharePeer.DEFAULT_SPEED_LIMIT_MBPS
             },
@@ -568,8 +575,17 @@ class PairShareService : Service() {
     }
 
     private fun sharingAllowedFor(peerId: String): Boolean =
-        running.get() && repository.isEnabled() && repository.isSharingEnabled() && vpnConnected &&
+        bondingAllowedFor(peerId) && vpnConnected
+
+    private fun bondingAllowedFor(peerId: String): Boolean =
+        running.get() && repository.isEnabled() && repository.isSharingEnabled() &&
             repository.peer(peerId)?.canUseMyConnection == true
+
+    private fun bondingUnavailableReason(peerId: String): String = when {
+        !repository.isSharingEnabled() -> "この端末の共有がオフです"
+        repository.peer(peerId)?.canUseMyConnection != true -> "このペア端末への共有が許可されていません"
+        else -> "PairBond を利用できません"
+    }
 
     private fun sharingUnavailableReason(peerId: String): String = when {
         !repository.isSharingEnabled() -> "この端末の共有はオフです"

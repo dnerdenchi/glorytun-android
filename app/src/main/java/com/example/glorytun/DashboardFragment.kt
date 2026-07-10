@@ -222,17 +222,10 @@ class DashboardFragment : Fragment() {
     }
 
     private fun startProxyConnection() {
-        val pairShareRepository = PairShareRepository(requireContext())
-        val receivePeer = pairShareRepository.activeReceivePeer()
-        if (pairShareRepository.isReceivingEnabled() && receivePeer != null) {
-            ConnectionController.startPairShareProxy(requireContext())
-            viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
-            return
-        }
-
         val ip = viewModel.serverIp.value ?: ""
         val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
         val secret = (activity as? MainActivity)?.getSecret() ?: ""
+        val pairShareRepository = PairShareRepository(requireContext())
 
         if (ip.isEmpty()) {
             Toast.makeText(requireContext(), "サーバーアドレスを設定してください", Toast.LENGTH_SHORT).show()
@@ -241,6 +234,12 @@ class DashboardFragment : Fragment() {
 
         if (secret.isBlank()) {
             Toast.makeText(requireContext(), "mqvpn 認証キーを設定してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (pairShareRepository.isReceivingEnabled() && pairShareRepository.hasReceivingPeers()) {
+            ConnectionController.startPairShareProxy(requireContext(), ip, port, secret)
+            viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
             return
         }
 

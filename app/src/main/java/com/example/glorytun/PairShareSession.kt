@@ -83,8 +83,8 @@ private object PairSharePayload {
 
 class PairShareTcpStream internal constructor(
     private val client: PairShareClient,
-    val id: Int,
-) : Closeable {
+    override val id: Int,
+) : PairShareTcpTunnel {
     private val opened = CountDownLatch(1)
     private val inbound = PipedInputStream(INBOUND_BUFFER_BYTES)
     private val inboundWriter = PipedOutputStream(inbound)
@@ -96,7 +96,7 @@ class PairShareTcpStream internal constructor(
     @Volatile
     private var openedSuccessfully = false
 
-    fun awaitOpen(timeoutMillis: Long = OPEN_TIMEOUT_MILLIS): Boolean {
+    override fun awaitOpen(timeoutMillis: Long): Boolean {
         if (!opened.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
             openError = "ペア端末への接続がタイムアウトしました"
             return false
@@ -104,11 +104,11 @@ class PairShareTcpStream internal constructor(
         return openedSuccessfully
     }
 
-    fun errorMessage(): String? = openError
+    override fun errorMessage(): String? = openError
 
-    fun input(): InputStream = inbound
+    override fun input(): InputStream = inbound
 
-    fun write(buffer: ByteArray, offset: Int = 0, length: Int = buffer.size) {
+    override fun write(buffer: ByteArray, offset: Int, length: Int) {
         if (closed.get()) throw IOException("Pair & Share TCP ストリームは閉じられています")
         var currentOffset = offset
         var remaining = length
@@ -166,8 +166,8 @@ class PairShareTcpStream internal constructor(
 
 class PairShareUdpStream internal constructor(
     private val client: PairShareClient,
-    val id: Int,
-) : Closeable {
+    override val id: Int,
+) : PairShareUdpTunnel {
     private val opened = CountDownLatch(1)
     private val closed = AtomicBoolean(false)
 
@@ -178,9 +178,9 @@ class PairShareUdpStream internal constructor(
     private var openError: String? = null
 
     @Volatile
-    var onDatagram: ((host: String, port: Int, payload: ByteArray) -> Unit)? = null
+    override var onDatagram: ((host: String, port: Int, payload: ByteArray) -> Unit)? = null
 
-    fun awaitOpen(timeoutMillis: Long = 20_000L): Boolean {
+    override fun awaitOpen(timeoutMillis: Long): Boolean {
         if (!opened.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
             openError = "UDP 共有接続がタイムアウトしました"
             return false
@@ -188,9 +188,9 @@ class PairShareUdpStream internal constructor(
         return openedSuccessfully
     }
 
-    fun errorMessage(): String? = openError
+    override fun errorMessage(): String? = openError
 
-    fun send(host: String, port: Int, payload: ByteArray) {
+    override fun send(host: String, port: Int, payload: ByteArray) {
         if (closed.get()) throw IOException("Pair & Share UDP ストリームは閉じられています")
         client.sendUdpData(id, host, port, payload)
     }
@@ -247,8 +247,33 @@ class PairShareClient(
         tcpStreams[id] = stream
         try {
             send(PairShareFrameType.OPEN_TCP, id, PairSharePayload.tcpTarget(host, port))
-            if (!stream.awaitOpen()) {
+            if (!stream.awaitOpen(20_000L)) {
                 throw IOException(stream.errorMessage() ?: "TCP 共有接続を開始できません")
+            }
+            return stream
+        } catch (error: Exception) {
+            tcpStreams.remove(id)
+            stream.close()
+            throw error
+        }
+    }
+
+    /**
+     * Opens an opaque relay path to the BondVPN PairBond server. The paired
+     * device binds this socket to its cellular Network; the inner bytes remain
+     * encrypted end-to-end between the receiving device and the relay.
+     */
+    fun openBondPath(serverHost: String, serverPort: Int): PairShareTcpStream {
+        require(serverHost.isNotBlank() && serverPort in 1..65535) {
+            "PairBond サーバー宛先が不正です"
+        }
+        val id = nextStreamId.getAndIncrement()
+        val stream = PairShareTcpStream(this, id)
+        tcpStreams[id] = stream
+        try {
+            send(PairShareFrameType.OPEN_BOND_PATH, id, PairSharePayload.tcpTarget(serverHost, serverPort))
+            if (!stream.awaitOpen(20_000L)) {
+                throw IOException(stream.errorMessage() ?: "PairBond パスを開始できません")
             }
             return stream
         } catch (error: Exception) {
@@ -264,7 +289,7 @@ class PairShareClient(
         udpStreams[id] = stream
         try {
             send(PairShareFrameType.OPEN_UDP, id)
-            if (!stream.awaitOpen()) {
+            if (!stream.awaitOpen(20_000L)) {
                 throw IOException(stream.errorMessage() ?: "UDP 共有接続を開始できません")
             }
             return stream
@@ -425,14 +450,17 @@ class PairShareClient(
 
 /** Runs on the sharing device after PairShareService authenticates the incoming peer. */
 internal class PairShareHostSession(
+    private val context: Context,
     private val socket: Socket,
     private val codec: PairShareFrameCodec,
     private val sharingAllowed: () -> Boolean,
+    private val bondingAllowed: () -> Boolean,
     speedLimitMbps: () -> Int,
     private val onClosed: () -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val tcpRelays = ConcurrentHashMap<Int, PairShareHostTcpRelay>()
+    private val bondTcpRelays = ConcurrentHashMap<Int, PairShareHostTcpRelay>()
     private val udpRelays = ConcurrentHashMap<Int, PairShareHostUdpRelay>()
     private val ioExecutor: ExecutorService = Executors.newCachedThreadPool()
     private val rateLimiter = PairShareRateLimiter(speedLimitMbps)
@@ -443,8 +471,11 @@ internal class PairShareHostSession(
                 val frame = codec.read()
                 when (frame.type) {
                     PairShareFrameType.OPEN_TCP -> openTcp(frame)
-                    PairShareFrameType.TCP_DATA -> tcpRelays[frame.streamId]?.write(frame.payload)
-                    PairShareFrameType.CLOSE_TCP -> tcpRelays.remove(frame.streamId)?.close()
+                    PairShareFrameType.OPEN_BOND_PATH -> openBondPath(frame)
+                    PairShareFrameType.TCP_DATA ->
+                        (tcpRelays[frame.streamId] ?: bondTcpRelays[frame.streamId])?.write(frame.payload)
+                    PairShareFrameType.CLOSE_TCP ->
+                        (tcpRelays.remove(frame.streamId) ?: bondTcpRelays.remove(frame.streamId))?.close()
                     PairShareFrameType.OPEN_UDP -> openUdp(frame)
                     PairShareFrameType.UDP_DATA -> {
                         val datagram = PairSharePayload.parseUdpDatagram(frame.payload)
@@ -500,6 +531,47 @@ internal class PairShareHostSession(
         codec.send(PairShareFrameType.OPEN_TCP_OK, frame.streamId)
     }
 
+    private fun openBondPath(frame: PairShareFrame) {
+        if (!bondingAllowed()) {
+            codec.send(
+                PairShareFrameType.OPEN_TCP_FAIL,
+                frame.streamId,
+                PairSharePayload.message("このペア端末は現在、SIM回線の共有を許可していません"),
+            )
+            return
+        }
+        val target = runCatching { PairSharePayload.parseTcpTarget(frame.payload) }
+            .getOrElse { error ->
+                codec.send(
+                    PairShareFrameType.OPEN_TCP_FAIL,
+                    frame.streamId,
+                    PairSharePayload.message(error.message ?: "PairBond サーバー宛先が不正です"),
+                )
+                return
+            }
+        val relay = PairShareHostTcpRelay(
+            streamId = frame.streamId,
+            codec = codec,
+            rateLimiter = rateLimiter,
+            executor = ioExecutor,
+            allowed = bondingAllowed,
+            connectionFactory = { host, port -> PairShareNetwork.openCellularSocket(context, host, port) },
+            onClosed = { id -> bondTcpRelays.remove(id) },
+        )
+        val started = runCatching { relay.start(target.host, target.port) }
+        if (started.isFailure) {
+            relay.close()
+            codec.send(
+                PairShareFrameType.OPEN_TCP_FAIL,
+                frame.streamId,
+                PairSharePayload.message(started.exceptionOrNull()?.message ?: "SIM回線で PairBond サーバーに接続できません"),
+            )
+            return
+        }
+        bondTcpRelays[frame.streamId] = relay
+        codec.send(PairShareFrameType.OPEN_TCP_OK, frame.streamId)
+    }
+
     private fun openUdp(frame: PairShareFrame) {
         if (!sharingAllowed()) {
             codec.send(
@@ -533,12 +605,22 @@ internal class PairShareHostSession(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         tcpRelays.values.forEach(PairShareHostTcpRelay::close)
+        bondTcpRelays.values.forEach(PairShareHostTcpRelay::close)
         udpRelays.values.forEach(PairShareHostUdpRelay::close)
         tcpRelays.clear()
+        bondTcpRelays.clear()
         udpRelays.clear()
         ioExecutor.shutdownNow()
         runCatching { socket.close() }
         onClosed()
+    }
+
+    /** Stop legacy VPN-backed relays without interrupting SIM-bound PairBond paths. */
+    fun closeVpnRelays() {
+        tcpRelays.values.forEach(PairShareHostTcpRelay::close)
+        udpRelays.values.forEach(PairShareHostUdpRelay::close)
+        tcpRelays.clear()
+        udpRelays.clear()
     }
 }
 
@@ -547,6 +629,8 @@ private class PairShareHostTcpRelay(
     private val codec: PairShareFrameCodec,
     private val rateLimiter: PairShareRateLimiter,
     private val executor: ExecutorService,
+    private val allowed: () -> Boolean = { true },
+    private val connectionFactory: ((String, Int) -> Socket)? = null,
     private val onClosed: (Int) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -555,10 +639,12 @@ private class PairShareHostTcpRelay(
 
     fun start(host: String, port: Int) {
         val address = resolvePublicAddress(host)
-        val rawSocket = Socket()
+        val rawSocket = connectionFactory?.invoke(address.hostAddress ?: host, port) ?: Socket()
         try {
             rawSocket.tcpNoDelay = true
-            rawSocket.connect(InetSocketAddress(address, port), REMOTE_CONNECT_TIMEOUT_MILLIS)
+            if (!rawSocket.isConnected) {
+                rawSocket.connect(InetSocketAddress(address, port), REMOTE_CONNECT_TIMEOUT_MILLIS)
+            }
             socket = rawSocket
             output = rawSocket.getOutputStream()
             executor.execute(::readLoop)
@@ -570,9 +656,16 @@ private class PairShareHostTcpRelay(
 
     fun write(data: ByteArray) {
         if (closed.get()) return
+        if (!allowed()) {
+            close()
+            return
+        }
         rateLimiter.acquire(data.size)
         synchronized(this) {
-            if (closed.get()) return
+            if (closed.get() || !allowed()) {
+                if (!allowed()) close()
+                return
+            }
             output.write(data)
             output.flush()
         }
@@ -583,9 +676,10 @@ private class PairShareHostTcpRelay(
         try {
             val input = socket.getInputStream()
             while (!closed.get()) {
+                if (!allowed()) break
                 val read = input.read(buffer)
                 if (read < 0) break
-                if (read > 0) {
+                if (read > 0 && allowed()) {
                     rateLimiter.acquire(read)
                     codec.send(PairShareFrameType.TCP_DATA, streamId, buffer.copyOf(read))
                 }
@@ -713,7 +807,7 @@ private fun resolvePublicAddress(host: String): InetAddress {
 
 /** Bridges one local SOCKS5 TCP stream into an authenticated Pair & Share stream. */
 class PairShareTcpProxyConnection(
-    private val stream: PairShareTcpStream,
+    private val stream: PairShareTcpTunnel,
     private val clientOutput: OutputStream,
     private val onClosed: () -> Unit,
 ) : Closeable {
@@ -772,7 +866,7 @@ class PairShareUdpAssociation private constructor(
     private val onClosed: () -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
-    private lateinit var stream: PairShareUdpStream
+    private lateinit var stream: PairShareUdpTunnel
 
     @Volatile
     private var clientEndpoint: InetSocketAddress? = null

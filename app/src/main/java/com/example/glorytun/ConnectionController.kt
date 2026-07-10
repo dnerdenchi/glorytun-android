@@ -44,11 +44,19 @@ object ConnectionController {
         })
     }
 
-    fun startPairShareProxy(context: Context) {
+    fun startPairShareProxy(
+        context: Context,
+        ip: String,
+        port: String,
+        secret: String,
+    ) {
         stopVpn(context)
         context.startService(Intent(context, AdGuardProxyService::class.java).apply {
             action = GlorytunConstants.ACTION_PROXY_START
             putExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, true)
+            putExtra(MqvpnConfigFactory.EXTRA_SERVER_ADDRESS, ip)
+            putExtra(MqvpnConfigFactory.EXTRA_SERVER_PORT, port)
+            putExtra(MqvpnConfigFactory.EXTRA_AUTH_KEY, secret)
         })
     }
 

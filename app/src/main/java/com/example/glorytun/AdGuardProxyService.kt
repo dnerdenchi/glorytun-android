@@ -104,13 +104,22 @@ class AdGuardProxyService : MqvpnVpnService() {
 
         if (intent.getBooleanExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, false)) {
             val pairRepository = PairShareRepository(this)
-            if (!pairRepository.isReceivingEnabled() || pairRepository.activeReceivePeer() == null) {
-                Log.w(TAG, "Pair & Share receive was requested without an active paired device")
+            if (!pairRepository.isReceivingEnabled() || !pairRepository.hasReceivingPeers()) {
+                Log.w(TAG, "PairBond receive was requested without a selected paired device")
                 isRunning.set(false)
                 sendState(ConnectionStates.DISCONNECTED)
                 stopSelf(startId)
                 return
             }
+            val bondConfig = runCatching { PairBondConfig.fromIntent(intent) }
+                .getOrElse { error ->
+                    Log.w(TAG, "Invalid PairBond relay config: " + error.message)
+                    isRunning.set(false)
+                    sendState(ConnectionStates.DISCONNECTED)
+                    stopSelf(startId)
+                    return
+                }
+            PairShareCoordinator.startBonding(this, bondConfig)
             pairShareMode = true
             val port = proxyPort()
             startForegroundNotification(port, "Pair & Share 接続を開始しています")

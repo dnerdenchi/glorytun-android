@@ -7,6 +7,8 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /** Wi-Fi-only transport helpers. Pair & Share is intentionally LAN-scoped. */
 object PairShareNetwork {
@@ -16,6 +18,40 @@ object PairShareNetwork {
             manager.getNetworkCapabilities(network)
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
                 localIpv4(context, network) != null
+        }
+    }
+
+    /**
+     * Returns an underlying cellular network rather than the app's VPN default
+     * network. PairBond uses this to make each paired device a distinct SIM
+     * egress path.
+     */
+    fun activeCellular(context: Context): Network? {
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        return manager.allNetworks.firstOrNull { network ->
+            manager.getNetworkCapabilities(network)?.let { capabilities ->
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            } == true
+        }
+    }
+
+    fun openCellularSocket(context: Context, host: String, port: Int): Socket {
+        require(port in 1..65535)
+        val network = activeCellular(context)
+            ?: throw java.io.IOException("利用可能なモバイル回線がありません")
+        val address = InetAddress.getAllByName(host)
+            .firstOrNull(::isPublicInternetAddress)
+            ?: throw java.io.IOException("PairBond サーバーはパブリックアドレスである必要があります")
+        val socket = network.socketFactory.createSocket()
+        try {
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(address, port), CELLULAR_CONNECT_TIMEOUT_MILLIS)
+            return socket
+        } catch (error: Throwable) {
+            runCatching { socket.close() }
+            throw error
         }
     }
 
@@ -60,4 +96,6 @@ object PairShareNetwork {
         }
         return true
     }
+
+    private const val CELLULAR_CONNECT_TIMEOUT_MILLIS = 15_000
 }

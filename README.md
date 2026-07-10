@@ -55,6 +55,18 @@ gradle test assembleDebug
 
 Let's Encrypt などの信頼済み証明書をサーバーに設定している場合は、「自己署名証明書を許可する」をオフにしてください。
 
+## PairBond: 複数ペアSIM端末のプロキシ・ボンディング
+
+Pair & Share は、同じ Wi-Fi にいる複数のペア端末のモバイル回線を、プロキシモードで同時に使う PairBond を備えています。
+
+- 各ペア端末を「自動ボンディング」「バックアップ専用」「使用しない」に設定できます。
+- 自動ボンディングのパスは、RTT・ACK応答・再送率・実効転送量を使ってチャンク単位で自動配分します。
+- バックアップ専用は通常時に通信を流さず、アクティブパスが途切れた時に自動で引き継ぎます。
+- TCP はサーバーで順序復元し、未ACKチャンクを別パスへ再送します。SOCKS5 TCP、HTTP CONNECT、SOCKS5 UDP ASSOCIATE に対応します。
+- Pair & Share 画面には、ペアごとの優先度、状態、送受信量、瞬間速度、RTT、損失、再送回数を表示します。
+
+利用前に、サーバーへ PairBond リレーを配備してください。配備手順は [server/pairbond-relay/README.md](server/pairbond-relay/README.md) を参照してください。リレーは mqvpn と同じ [Auth] Key を安全に読み取り、TCP 443 だけを追加で待ち受けます。
+
 ## mqvpn サーバーのセットアップ
 
 Ubuntu / Debian 系の VPS に mqvpn サーバーを建てる例です。以下では UDP 443 を使います。

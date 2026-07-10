@@ -288,4 +288,6 @@ object PairShareFrameType {
     const val PONG = 10
     const val OPEN_UDP_OK = 11
     const val OPEN_UDP_FAIL = 12
+    /** Opaque, cellular-bound path from the peer to the PairBond relay. */
+    const val OPEN_BOND_PATH = 13
 }

@@ -24,7 +24,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="同じ Wi-Fi 上の BondVPN 端末をペアリングし、暗号化されたプロキシ経路で接続を共有します。"
+            android:text="同じ Wi-Fi 上の複数の BondVPN 端末をペアリングし、SIM回線を同時利用する暗号化プロキシ経路を作ります。"
             android:textColor="@color/on_surface_variant"
             android:textSize="13sp" />
 
@@ -161,7 +161,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:text="共有端末は BondVPN の VPN 接続中である必要があります。端末ごとに許可と上限を設定できます。"
+                android:text="共有端末のモバイル回線を PairBond の経路として提供します。端末ごとに許可と上限を設定できます。"
                 android:textColor="@color/on_surface_variant"
                 android:textSize="12sp" />
 
@@ -177,7 +177,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:text="受信に使う端末を選ぶと、ダッシュボードのプロキシ接続がその端末経由になります。"
+                android:text="各ペア端末を「自動ボンディング」または「バックアップ専用」に設定してください。ダッシュボードのプロキシ接続で複数SIMを同時に使います。"
                 android:textColor="@color/on_surface_variant"
                 android:textSize="12sp" />
         </LinearLayout>

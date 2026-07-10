@@ -121,7 +121,7 @@ class PairShareFragment : Fragment() {
             peersTitle.visibility = if (state.enabled) View.VISIBLE else View.GONE
             renderPending(state.pending)
             renderDiscoveries(state.discovered)
-            renderPeers(state.peers)
+            renderPeers(state.peers, state.peerStats)
         } finally {
             rendering = false
         }
@@ -167,16 +167,20 @@ class PairShareFragment : Fragment() {
         }
     }
 
-    private fun renderPeers(items: List<PairSharePeer>) {
+    private fun renderPeers(
+        items: List<PairSharePeer>,
+        statsByPeer: Map<String, PairSharePeerStats>,
+    ) {
         peersContainer.removeAllViews()
         if (items.isEmpty()) {
             peersContainer.addView(emptyText("ペア端末はまだありません。近くの端末を選んでペアリングしてください。"))
             return
         }
-        val activePeerId = repository.activeReceivePeerId()
         items.forEach { peer ->
             val card = card()
             card.addView(title(peer.displayName))
+            val priority = repository.pathPriority(peer)
+            card.addView(subtitle("パス優先度: " + priority.displayName))
             val availability = if (peer.address != null && peer.port > 0) "同じ Wi-Fi 上で検出済み" else "同じ Wi-Fi 上で再検出待ち"
             card.addView(subtitle(availability))
             val sharingLabel = when {
@@ -185,17 +189,74 @@ class PairShareFragment : Fragment() {
                 else -> "この端末からの共有: 許可済み（${peer.speedLimitMbps} Mbps）"
             }
             card.addView(subtitle(sharingLabel))
+            statsByPeer[peer.id]?.let { stats ->
+                card.addView(subtitle(formatPeerStats(stats)))
+            }
             val actions = actionRow()
             actions.addView(button(if (peer.canUseMyConnection) "共有設定" else "共有を許可") {
                 showSharePermissionDialog(peer)
             })
-            actions.addView(button(if (activePeerId == peer.id) "受信に使用中" else "受信に使用", outlined = activePeerId == peer.id) {
+            actions.addView(button("パス設定", outlined = repository.pathPriority(peer) == PairBondPathPriority.DISABLED) {
                 usePeerForReceiving(peer)
             })
             actions.addView(button("解除", outlined = true) { showUnpairDialog(peer) })
             card.addView(actions)
             peersContainer.addView(card)
         }
+    }
+
+    private fun formatPeerStats(stats: PairSharePeerStats): String {
+        val rtt = stats.rttMillis?.let { it.toString() + " ms" } ?: "--"
+        val loss = (stats.lossPermille / 10.0).toString() + "%"
+        return "状態: " + stats.status +
+            "  ↑" + formatRate(stats.txBytesPerSecond) +
+            "  ↓" + formatRate(stats.rxBytesPerSecond) +
+            "  RTT " + rtt +
+            "  損失 " + loss +
+            "  再送 " + stats.retransmissions +
+            "\n累計 ↑" + formatBytes(stats.txBytes) + "  ↓" + formatBytes(stats.rxBytes)
+    }
+
+    private fun formatRate(bytesPerSecond: Long): String = formatBytes(bytesPerSecond) + "/s"
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1_000_000_000L -> (bytes / 1_000_000_000L).toString() + " GB"
+        bytes >= 1_000_000L -> (bytes / 1_000L).toString() + " MB"
+        bytes >= 1_000L -> (bytes / 1_000L).toString() + " KB"
+        else -> bytes.toString() + " B"
+    }
+
+    private fun showPathPriorityDialog(peer: PairSharePeer) {
+        val priorities = arrayOf(
+            PairBondPathPriority.ACTIVE,
+            PairBondPathPriority.BACKUP_ONLY,
+            PairBondPathPriority.DISABLED,
+        )
+        val labels = arrayOf(
+            "自動ボンディング（同時に使用）",
+            "バックアップ専用（障害時のみ使用）",
+            "使用しない",
+        )
+        var selected = priorities.indexOf(repository.pathPriority(peer)).coerceAtLeast(0)
+        AlertDialog.Builder(requireContext())
+            .setTitle(peer.displayName + " のパス設定")
+            .setMessage("複数の「自動ボンディング」パスは同時に使用します。バックアップ専用は通常のパスが利用不能な時だけ使います。")
+            .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("保存") { _, _ ->
+                val priority = priorities[selected]
+                repository.setPeerPathPriority(peer.id, priority)
+                if (priority != PairBondPathPriority.DISABLED) {
+                    repository.setReceivingEnabled(true)
+                    requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, true)
+                        .apply()
+                }
+                PairShareCoordinator.refreshBondingPaths(requireContext())
+                PairShareService.refresh(requireContext())
+            }
+            .show()
     }
 
     private fun showPairDialog(discovery: PairShareDiscovery) {
@@ -226,7 +287,7 @@ class PairShareFragment : Fragment() {
         var selected = limits.indexOf(peer.speedLimitMbps).takeIf { it >= 0 } ?: 2
         AlertDialog.Builder(requireContext())
             .setTitle("${peer.displayName} への共有")
-            .setMessage("共有を有効にすると、この端末が BondVPN VPN 接続中の間だけ相手端末が接続を利用できます。")
+            .setMessage("共有を有効にすると、相手端末はこの端末のSIM回線を PairBond の暗号化パスとして利用できます。上限はこの端末で強制します。")
             .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
             .setNegativeButton(if (peer.canUseMyConnection) "共有を停止" else "キャンセル") { _, _ ->
                 if (peer.canUseMyConnection) {
@@ -242,19 +303,7 @@ class PairShareFragment : Fragment() {
     }
 
     private fun usePeerForReceiving(peer: PairSharePeer) {
-        repository.setReceivingEnabled(true)
-        repository.setActiveReceivePeer(peer.id)
-        requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(GlorytunConstants.KEY_ADGUARD_PROXY_MODE_ENABLED, true)
-            .apply()
-        PairShareCoordinator.closeClient()
-        PairShareService.refresh(requireContext())
-        Toast.makeText(
-            requireContext(),
-            "${peer.displayName} を受信に使います。ダッシュボードでプロキシ接続を開始してください。",
-            Toast.LENGTH_LONG,
-        ).show()
+        showPathPriorityDialog(peer)
     }
 
     private fun showUnpairDialog(peer: PairSharePeer) {
