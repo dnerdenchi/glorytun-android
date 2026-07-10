@@ -51,6 +51,8 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val udpIpId = AtomicInteger((System.nanoTime() and 0xffff).toInt())
     private val connections = ConcurrentHashMap<TcpTunnelKey, ProxyTcpTunnelConnection>()
     private val udpAssociations = ConcurrentHashMap<UdpTunnelKey, ProxyUdpTunnelAssociation>()
+    private val pairShareConnections = ConcurrentHashMap.newKeySet<PairShareTcpProxyConnection>()
+    private val pairShareUdpAssociations = ConcurrentHashMap.newKeySet<PairShareUdpAssociation>()
     private val pathTrafficAccumulator = PathTrafficAccumulator()
 
     @Volatile private var serverSocket: ServerSocket? = null
@@ -61,6 +63,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     @Volatile private var latestPaths: List<PathInfo> = emptyList()
     @Volatile private var dailyWifiKB = 0.0
     @Volatile private var dailySimKB = 0.0
+    @Volatile private var pairShareMode = false
 
     private val statsRunnable = object : Runnable {
         override fun run() {
@@ -99,6 +102,26 @@ class AdGuardProxyService : MqvpnVpnService() {
     private fun startProxy(intent: Intent, startId: Int) {
         if (!isRunning.compareAndSet(false, true)) return
 
+        if (intent.getBooleanExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, false)) {
+            val pairRepository = PairShareRepository(this)
+            if (!pairRepository.isReceivingEnabled() || pairRepository.activeReceivePeer() == null) {
+                Log.w(TAG, "Pair & Share receive was requested without an active paired device")
+                isRunning.set(false)
+                sendState(ConnectionStates.DISCONNECTED)
+                stopSelf(startId)
+                return
+            }
+            pairShareMode = true
+            val port = proxyPort()
+            startForegroundNotification(port, "Pair & Share 接続を開始しています")
+            resetProxyState()
+            sendState(ConnectionStates.PROXY_CONNECTING)
+            startLocalProxy()
+            return
+        }
+
+        pairShareMode = false
+
         val config = runCatching { MqvpnConfigFactory.fromIntent(this, intent) }
             .getOrElse { error ->
                 Log.e(TAG, "Invalid mqvpn proxy config: ${error.message}", error)
@@ -122,11 +145,15 @@ class AdGuardProxyService : MqvpnVpnService() {
             return
         }
 
+        val wasPairShareMode = pairShareMode
+        pairShareMode = false
         closeLocalProxy()
         closeConnections()
+        closePairShareConnections()
         stopStats()
         closeDownlinkPipe()
-        stopTunnel()
+        if (!wasPairShareMode) stopTunnel()
+        if (wasPairShareMode) PairShareCoordinator.closeClient()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         sendState(ConnectionStates.DISCONNECTED)
         stopSelf()
@@ -192,6 +219,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     }
 
     private fun stopProxyAfterTunnelClosed() {
+        if (pairShareMode) return
         isRunning.set(false)
         closeLocalProxy()
         closeConnections()
@@ -213,7 +241,8 @@ class AdGuardProxyService : MqvpnVpnService() {
                     socket.bind(InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), port))
                     serverSocket = socket
                     Log.i(TAG, "AdGuard mqvpn proxy listening on $LOOPBACK_HOST:$port")
-                    updateNotification("$LOOPBACK_HOST:$port via mqvpn")
+                    val route = if (pairShareMode) "ペア端末経由" else "mqvpn 経由"
+                    updateNotification("$LOOPBACK_HOST:$port $route")
                     sendState(ConnectionStates.PROXY_CONNECTED)
 
                     while (isRunning.get()) {
@@ -316,6 +345,17 @@ class AdGuardProxyService : MqvpnVpnService() {
             return
         }
 
+        if (pairShareMode) {
+            val connection = openPairShareConnection(host, port, client.getOutputStream())
+            if (connection == null) {
+                sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
+                return
+            }
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_SUCCEEDED)
+            connection.relayFrom(clientIn)
+            return
+        }
+
         val connection = openTunnelConnection(host, port, client.getOutputStream())
         if (connection == null) {
             sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
@@ -333,6 +373,11 @@ class AdGuardProxyService : MqvpnVpnService() {
     }
 
     private fun handleUdpAssociate(client: Socket, clientIn: InputStream) {
+        if (pairShareMode) {
+            handlePairShareUdpAssociate(client, clientIn)
+            return
+        }
+
         val local = localAddress
         if (local == null) {
             sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
@@ -387,6 +432,23 @@ class AdGuardProxyService : MqvpnVpnService() {
             return
         }
 
+        if (pairShareMode) {
+            val connection = openPairShareConnection(target.host, target.port, client.getOutputStream())
+            if (connection == null) {
+                client.getOutputStream().write(
+                    "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n"
+                        .toByteArray(StandardCharsets.ISO_8859_1)
+                )
+                return
+            }
+            client.getOutputStream().write(
+                "HTTP/1.1 200 Connection Established\r\n\r\n"
+                    .toByteArray(StandardCharsets.ISO_8859_1)
+            )
+            connection.relayFrom(clientIn)
+            return
+        }
+
         val connection = openTunnelConnection(target.host, target.port, client.getOutputStream())
         if (connection == null || !connection.start()) {
             connection?.close()
@@ -402,6 +464,50 @@ class AdGuardProxyService : MqvpnVpnService() {
                 .toByteArray(StandardCharsets.ISO_8859_1)
         )
         connection.relayFrom(clientIn)
+    }
+
+    private fun handlePairShareUdpAssociate(client: Socket, clientIn: InputStream) {
+        lateinit var association: PairShareUdpAssociation
+        association = try {
+            PairShareUdpAssociation.bind(
+                context = this,
+                allowedAddress = client.inetAddress,
+                onClosed = { pairShareUdpAssociations.remove(association) },
+            ).also {
+                pairShareUdpAssociations.add(it)
+                it.start()
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Pair & Share UDP associate failed: ${error.message}")
+            sendSocks5Reply(client.getOutputStream(), SOCKS5_NETWORK_UNREACHABLE)
+            return
+        }
+
+        sendSocks5Reply(
+            output = client.getOutputStream(),
+            status = SOCKS5_SUCCEEDED,
+            boundAddress = InetAddress.getByName(LOOPBACK_HOST).address,
+            boundPort = association.localUdpPort,
+        )
+        association.waitForControlClose(clientIn)
+    }
+
+    private fun openPairShareConnection(
+        host: String,
+        port: Int,
+        clientOutput: OutputStream,
+    ): PairShareTcpProxyConnection? {
+        return runCatching {
+            val stream = PairShareCoordinator.openTcp(this, host, port)
+            lateinit var connection: PairShareTcpProxyConnection
+            connection = PairShareTcpProxyConnection(stream, clientOutput) {
+                pairShareConnections.remove(connection)
+            }
+            pairShareConnections.add(connection)
+            connection
+        }.onFailure { error ->
+            Log.w(TAG, "Pair & Share TCP connection failed: ${error.message}")
+        }.getOrNull()
     }
 
     private fun openTunnelConnection(host: String, port: Int, clientOutput: OutputStream): ProxyTcpTunnelConnection? {
@@ -522,6 +628,13 @@ class AdGuardProxyService : MqvpnVpnService() {
         connections.clear()
         udpAssociations.values.toSet().forEach { it.close() }
         udpAssociations.clear()
+    }
+
+    private fun closePairShareConnections() {
+        pairShareConnections.toSet().forEach { it.close() }
+        pairShareConnections.clear()
+        pairShareUdpAssociations.toSet().forEach { it.close() }
+        pairShareUdpAssociations.clear()
     }
 
     private fun closeDownlinkPipe() {

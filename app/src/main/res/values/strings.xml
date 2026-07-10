@@ -3,6 +3,7 @@
     <string name="nav_dashboard">ダッシュボード</string>
     <string name="nav_stats">利用状況</string>
     <string name="nav_bonding">接続</string>
+    <string name="nav_pair_share">共有</string>
     <string name="nav_settings">設定</string>
     <string name="status_connected">接続中</string>
     <string name="status_disconnected">未接続</string>

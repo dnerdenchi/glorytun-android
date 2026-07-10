@@ -222,6 +222,14 @@ class DashboardFragment : Fragment() {
     }
 
     private fun startProxyConnection() {
+        val pairShareRepository = PairShareRepository(requireContext())
+        val receivePeer = pairShareRepository.activeReceivePeer()
+        if (pairShareRepository.isReceivingEnabled() && receivePeer != null) {
+            ConnectionController.startPairShareProxy(requireContext())
+            viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
+            return
+        }
+
         val ip = viewModel.serverIp.value ?: ""
         val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
         val secret = (activity as? MainActivity)?.getSecret() ?: ""
@@ -256,7 +264,12 @@ class DashboardFragment : Fragment() {
         if (ConnectionController.isProxyModeEnabled(requireContext())) {
             val port = requireContext().getSharedPreferences(GlorytunConstants.PREFS_PROXY, Context.MODE_PRIVATE)
                 .getInt(GlorytunConstants.KEY_ADGUARD_PROXY_PORT, GlorytunConstants.DEFAULT_ADGUARD_PROXY_PORT)
-            tvServerInfo.text = "AdGuard: 127.0.0.1:$port"
+            val receivePeer = PairShareRepository(requireContext()).activeReceivePeer()
+            tvServerInfo.text = if (PairShareRepository(requireContext()).isReceivingEnabled() && receivePeer != null) {
+                "Pair & Share: ${receivePeer.displayName} → 127.0.0.1:$port"
+            } else {
+                "AdGuard: 127.0.0.1:$port"
+            }
         } else {
             val port = viewModel.serverPort.value ?: MqvpnConfigFactory.DEFAULT_PORT
             tvServerInfo.text = if (ip.isNotEmpty()) "$ip:$port" else "サーバー: 未設定"

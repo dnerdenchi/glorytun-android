@@ -44,6 +44,14 @@ object ConnectionController {
         })
     }
 
+    fun startPairShareProxy(context: Context) {
+        stopVpn(context)
+        context.startService(Intent(context, AdGuardProxyService::class.java).apply {
+            action = GlorytunConstants.ACTION_PROXY_START
+            putExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, true)
+        })
+    }
+
     fun disconnectActive(context: Context, state: String?) {
         if (ConnectionStates.isProxyState(state)) {
             stopProxy(context)

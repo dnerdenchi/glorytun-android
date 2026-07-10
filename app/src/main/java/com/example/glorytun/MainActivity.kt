@@ -161,6 +161,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_dashboard -> { showFragment(DashboardFragment(), "dashboard"); true }
                 R.id.nav_stats     -> { showFragment(StatsFragment(),     "stats");     true }
                 R.id.nav_bonding   -> { showFragment(BondingFragment(),   "bonding");   true }
+                R.id.nav_pair_share -> { showFragment(PairShareFragment(), "pair_share"); true }
                 R.id.nav_settings  -> { showFragment(SettingsFragment(),  "settings");  true }
                 else -> false
             }

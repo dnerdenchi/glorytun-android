@@ -8,6 +8,7 @@ object GlorytunConstants {
     const val ACTION_PROXY_START = "com.example.glorytun.PROXY_START"
     const val ACTION_PROXY_STOP = "com.example.glorytun.PROXY_STOP"
     const val ACTION_PROXY_QUERY_STATE = "com.example.glorytun.PROXY_QUERY_STATE"
+    const val EXTRA_PAIR_SHARE_RECEIVE = "pair_share_receive"
     const val ACTION_VPN_STATE = "VPN_STATE"
     const val ACTION_VPN_TRAFFIC_STATS = "VPN_TRAFFIC_STATS"
     const val ACTION_VPN_HOURLY_STATS = "VPN_HOURLY_STATS"
