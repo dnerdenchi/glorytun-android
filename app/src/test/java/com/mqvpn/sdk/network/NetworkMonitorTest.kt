@@ -34,6 +34,22 @@ class NetworkMonitorTest {
         assertEquals(PathType.ETHERNET, NetworkMonitor.classifyTransport(flags(hasEthernet = true)))
     }
 
+    @Test
+    fun underlyingNetworkPreferenceUsesCostBeforeTransportType() {
+        val unmeteredCellular = NetworkMonitor.preferenceRank(PathType.CELLULAR, isMetered = false)
+        val meteredWifi = NetworkMonitor.preferenceRank(PathType.WIFI, isMetered = true)
+
+        assertTrue(unmeteredCellular < meteredWifi)
+    }
+
+    @Test
+    fun equallyMeteredPathsPreferWifiBeforeCellular() {
+        val wifi = NetworkMonitor.preferenceRank(PathType.WIFI, isMetered = false)
+        val cellular = NetworkMonitor.preferenceRank(PathType.CELLULAR, isMetered = false)
+
+        assertTrue(wifi < cellular)
+    }
+
     private fun flags(
         hasInternet: Boolean = true,
         hasValidated: Boolean = true,

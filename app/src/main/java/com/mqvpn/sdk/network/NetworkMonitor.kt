@@ -36,6 +36,7 @@ class NetworkMonitor(private val context: Context) {
     val activeNetworks: Map<Network, NetworkPath> get() = _activeNetworks
 
     private var callback: ConnectivityManager.NetworkCallback? = null
+    private var cellularRequestCallback: ConnectivityManager.NetworkCallback? = null
 
     fun start(listener: (NetworkEvent) -> Unit) {
         val request = NetworkRequest.Builder()
@@ -68,6 +69,7 @@ class NetworkMonitor(private val context: Context) {
         cm.allNetworks.forEach { network ->
             handleCapabilities(network, cm.getNetworkCapabilities(network), listener)
         }
+        keepCellularNetworkAvailable()
     }
 
     /** Remove a network so the next onCapabilitiesChanged treats it as new. */
@@ -77,8 +79,48 @@ class NetworkMonitor(private val context: Context) {
 
     fun stop() {
         callback?.let { cm.unregisterNetworkCallback(it) }
+        cellularRequestCallback?.let { requestCallback ->
+            runCatching { cm.unregisterNetworkCallback(requestCallback) }
+                .onFailure { Log.w(TAG, "Failed to release cellular network request", it) }
+        }
         callback = null
+        cellularRequestCallback = null
         _activeNetworks.clear()
+    }
+
+    /** Networks currently used by mqvpn, ordered from least to most costly. */
+    fun preferredNetworks(): Array<Network> = _activeNetworks.values
+        .sortedWith(
+            compareBy<NetworkPath> { preferenceRank(it.type, it.isMetered) }
+                .thenBy { it.name }
+        )
+        .map { it.network }
+        .toTypedArray()
+
+    /**
+     * A passive callback does not keep a secondary cellular network up while
+     * Wi-Fi is the default. Hold one cellular request for the tunnel lifetime
+     * so multipath failover does not wait for the modem to reconnect.
+     */
+    private fun keepCellularNetworkAvailable() {
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        val requestCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                Log.d(TAG, "Cellular standby network available: $network")
+            }
+
+            override fun onUnavailable() {
+                Log.i(TAG, "Cellular standby network unavailable")
+            }
+        }
+
+        runCatching { cm.requestNetwork(request, requestCallback) }
+            .onSuccess { cellularRequestCallback = requestCallback }
+            .onFailure { Log.w(TAG, "Unable to keep cellular standby network", it) }
     }
 
     private fun handleCapabilities(
@@ -129,6 +171,17 @@ class NetworkMonitor(private val context: Context) {
 
         internal fun networkName(network: Network, type: PathType): String =
             "${type.name.lowercase()}-${network.networkHandle and 0xFFF}"
+
+        internal fun preferenceRank(type: PathType, isMetered: Boolean): Int {
+            val meteredRank = if (isMetered) 10 else 0
+            val transportRank = when (type) {
+                PathType.WIFI -> 0
+                PathType.ETHERNET -> 1
+                PathType.CELLULAR -> 2
+                PathType.OTHER -> 3
+            }
+            return meteredRank + transportRank
+        }
 
         private fun NetworkCapabilities.toFlags() = NetworkCapabilityFlags(
             hasInternet = hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),

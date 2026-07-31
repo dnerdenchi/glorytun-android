@@ -90,15 +90,7 @@ class PathTrafficAccumulator {
     }
 
     private fun PathInfo.transportGroup(): TransportGroup {
-        val lower = iface.lowercase()
-        return when {
-            lower.startsWith("cellular") ||
-                lower.startsWith("rmnet") ||
-                lower.startsWith("ccmni") ||
-                lower.startsWith("wwan") ||
-                lower.startsWith("pdp") -> TransportGroup.CELLULAR
-            else -> TransportGroup.WIFI
-        }
+        return if (isCellularInterface(iface)) TransportGroup.CELLULAR else TransportGroup.WIFI
     }
 
     private data class PathCounter(
@@ -110,4 +102,13 @@ class PathTrafficAccumulator {
         WIFI,
         CELLULAR
     }
+}
+
+internal fun isCellularInterface(iface: String): Boolean {
+    val lower = iface.lowercase()
+    return lower.startsWith("cellular") ||
+        lower.startsWith("rmnet") ||
+        lower.startsWith("ccmni") ||
+        lower.startsWith("wwan") ||
+        lower.startsWith("pdp")
 }

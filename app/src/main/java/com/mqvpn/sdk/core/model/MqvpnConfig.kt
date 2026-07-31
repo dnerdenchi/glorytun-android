@@ -9,6 +9,7 @@ import org.json.JSONObject
 data class MqvpnConfig(
     val serverAddress: String,
     val serverPort: Int = 443,
+    val tlsServerName: String? = null,
     val authKey: String,
     val insecure: Boolean = false,
     val multipathEnabled: Boolean = true,
@@ -18,6 +19,11 @@ data class MqvpnConfig(
     val reconnectIntervalSec: Int = 5,
     val killSwitch: Boolean = false,
     val dnsServers: List<String> = listOf("8.8.8.8", "1.1.1.1"),
+    val reorderEnabled: Boolean = false,
+    val reorderProfile: ReorderProfile = ReorderProfile.CELLULAR_BOND,
+    val reorderPorts: List<Int> = emptyList(),
+    val hybridEnabled: Boolean = false,
+    val hybridTcpMode: HybridTcpMode = HybridTcpMode.AUTO,
 ) {
 
     enum class Scheduler(val native: Int) {
@@ -34,12 +40,26 @@ data class MqvpnConfig(
         ERROR(3),
     }
 
+    enum class ReorderProfile(val native: Int) {
+        CELLULAR_BOND(3),
+        FIBER_LTE(4),
+    }
+
+    enum class HybridTcpMode(val native: Int) {
+        STREAM(0),
+        RAW(1),
+        AUTO(2),
+    }
+
     fun toJson(): String {
         val dns = JSONArray()
         dnsServers.forEach { dns.put(it) }
+        val reorder = JSONArray()
+        reorderPorts.forEach { reorder.put(it) }
         return JSONObject()
             .put("serverAddress", serverAddress)
             .put("serverPort", serverPort)
+            .also { json -> tlsServerName?.let { json.put("tlsServerName", it) } }
             .put("authKey", authKey)
             .put("insecure", insecure)
             .put("multipathEnabled", multipathEnabled)
@@ -49,6 +69,11 @@ data class MqvpnConfig(
             .put("reconnectIntervalSec", reconnectIntervalSec)
             .put("killSwitch", killSwitch)
             .put("dnsServers", dns)
+            .put("reorderEnabled", reorderEnabled)
+            .put("reorderProfile", reorderProfile.name)
+            .put("reorderPorts", reorder)
+            .put("hybridEnabled", hybridEnabled)
+            .put("hybridTcpMode", hybridTcpMode.name)
             .toString()
     }
 
@@ -58,6 +83,8 @@ data class MqvpnConfig(
             return MqvpnConfig(
                 serverAddress = obj.getString("serverAddress"),
                 serverPort = obj.optInt("serverPort", 443),
+                tlsServerName = obj.optString("tlsServerName")
+                    .takeIf { it.isNotBlank() },
                 authKey = obj.getString("authKey"),
                 insecure = obj.optBoolean("insecure", false),
                 multipathEnabled = obj.optBoolean("multipathEnabled", true),
@@ -73,7 +100,19 @@ data class MqvpnConfig(
                 reconnectIntervalSec = obj.optInt("reconnectIntervalSec", 5),
                 killSwitch = obj.optBoolean("killSwitch", false),
                 dnsServers = obj.optJSONArray("dnsServers")?.toStringList()
-                    ?: listOf("8.8.8.8", "1.1.1.1")
+                    ?: listOf("8.8.8.8", "1.1.1.1"),
+                reorderEnabled = obj.optBoolean("reorderEnabled", false),
+                reorderProfile = enumValueOfOrDefault(
+                    obj.optString("reorderProfile"),
+                    ReorderProfile.CELLULAR_BOND
+                ),
+                reorderPorts = obj.optJSONArray("reorderPorts")?.toIntList()
+                    ?: emptyList(),
+                hybridEnabled = obj.optBoolean("hybridEnabled", false),
+                hybridTcpMode = enumValueOfOrDefault(
+                    obj.optString("hybridTcpMode"),
+                    HybridTcpMode.AUTO
+                )
             )
         }
 
@@ -86,6 +125,12 @@ data class MqvpnConfig(
 
         private fun JSONArray.toStringList(): List<String> {
             return (0 until length()).mapNotNull { index -> optString(index).takeIf { it.isNotBlank() } }
+        }
+
+        private fun JSONArray.toIntList(): List<Int> {
+            return (0 until length()).mapNotNull { index ->
+                optInt(index, -1).takeIf { it in 1..65535 }
+            }
         }
     }
 }

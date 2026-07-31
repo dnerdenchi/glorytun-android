@@ -18,13 +18,13 @@ import androidx.fragment.app.Fragment
 class NetworkProtocolFragment : Fragment() {
 
     companion object {
-        const val PREFS_NAME = "network_mode_prefs"
-        const val KEY_MODE = "network_mode"
+        const val PREFS_NAME = MqvpnRoutingMode.PREFS_NAME
+        const val KEY_MODE = MqvpnRoutingMode.KEY_MODE
         const val KEY_THRESHOLD_KBPS = "speed_threshold_kbps"
 
-        const val MODE_BONDING    = "BONDING"
-        const val MODE_WIFI_FIRST = "WIFI_FIRST"
-        const val MODE_SIM_FIRST  = "SIM_FIRST"
+        const val MODE_BONDING = MqvpnRoutingMode.BALANCED
+        const val MODE_WIFI_FIRST = MqvpnRoutingMode.UDP_SPEED
+        const val MODE_SIM_FIRST = MqvpnRoutingMode.LOW_LATENCY
 
         const val DEFAULT_THRESHOLD_KBPS = 5000 // 5 Mbps
     }
@@ -168,15 +168,7 @@ class NetworkProtocolFragment : Fragment() {
         radioWifiFirst.isChecked = selectedMode == MODE_WIFI_FIRST
         radioSimFirst.isChecked  = selectedMode == MODE_SIM_FIRST
 
-        val showThreshold = selectedMode == MODE_WIFI_FIRST || selectedMode == MODE_SIM_FIRST
-        cardThreshold.visibility = if (showThreshold) View.VISIBLE else View.GONE
-
-        if (showThreshold) {
-            tvThresholdDesc.text = if (selectedMode == MODE_WIFI_FIRST)
-                "WiFi の推定帯域幅がこの値を下回ったとき SIM を追加します\n(SIM は不足分だけに制限されます)"
-            else
-                "SIM の推定帯域幅がこの値を下回ったとき WiFi を追加します\n(WiFi は不足分だけに制限されます)"
-        }
+        cardThreshold.visibility = View.GONE
 
         syncThrottleUi()
     }
@@ -218,7 +210,9 @@ class NetworkProtocolFragment : Fragment() {
 
     private fun loadSettings() {
         val prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        selectedMode  = prefs.getString(KEY_MODE, MODE_BONDING) ?: MODE_BONDING
+        selectedMode = MqvpnRoutingMode.normalize(
+            prefs.getString(KEY_MODE, MODE_BONDING)
+        )
         
         // Migrate from old MBps format safely
         val oldMBps = prefs.getInt("speed_threshold_mbps", -1)
@@ -239,9 +233,9 @@ class NetworkProtocolFragment : Fragment() {
             .apply()
 
         val modeName = when (selectedMode) {
-            MODE_BONDING    -> "ボンディング高速化"
-            MODE_WIFI_FIRST -> "WiFi 優先 (しきい値 ${formatKbps(thresholdKbps)})"
-            MODE_SIM_FIRST  -> "SIM 優先 (しきい値 ${formatKbps(thresholdKbps)})"
+            MODE_BONDING -> "公式・自動"
+            MODE_WIFI_FIRST -> "帯域集約"
+            MODE_SIM_FIRST -> "UDP安定"
             else -> selectedMode
         }
         Toast.makeText(requireContext(), "保存しました: $modeName", Toast.LENGTH_SHORT).show()

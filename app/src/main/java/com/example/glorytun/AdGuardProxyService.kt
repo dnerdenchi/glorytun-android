@@ -54,6 +54,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val pairShareConnections = ConcurrentHashMap.newKeySet<PairShareTcpProxyConnection>()
     private val pairShareUdpAssociations = ConcurrentHashMap.newKeySet<PairShareUdpAssociation>()
     private val pathTrafficAccumulator = PathTrafficAccumulator()
+    private val bandwidthHistory = BandwidthHistory(maxSamples = 1)
 
     @Volatile private var serverSocket: ServerSocket? = null
     @Volatile private var localAddress: Inet4Address? = null
@@ -69,9 +70,22 @@ class AdGuardProxyService : MqvpnVpnService() {
         override fun run() {
             if (!isRunning.get()) return
             val trafficUpdate = pathTrafficAccumulator.update(latestPaths)
+            val bandwidthSample = bandwidthHistory
+                .onTick(latestPaths, System.nanoTime())
+                .lastOrNull()
+            val wifiBps = bandwidthSample?.perPathBps
+                ?.filterKeys { !isCellularInterface(it) }
+                ?.values
+                ?.sum()
+                ?: 0L
+            val simBps = bandwidthSample?.perPathBps
+                ?.filterKeys(::isCellularInterface)
+                ?.values
+                ?.sum()
+                ?: 0L
             dailyWifiKB += trafficUpdate.wifiDeltaKB
             dailySimKB += trafficUpdate.simDeltaKB
-            broadcastTrafficStats(trafficUpdate.totals)
+            broadcastTrafficStats(trafficUpdate.totals, wifiBps, simBps)
             statsHandler.postDelayed(this, 1000)
         }
     }
@@ -656,6 +670,7 @@ class AdGuardProxyService : MqvpnVpnService() {
 
     private fun startStats() {
         pathTrafficAccumulator.reset()
+        bandwidthHistory.clear()
         dailyWifiKB = 0.0
         dailySimKB = 0.0
         statsHandler.removeCallbacks(statsRunnable)
@@ -665,6 +680,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     private fun stopStats() {
         statsHandler.removeCallbacks(statsRunnable)
         pathTrafficAccumulator.reset()
+        bandwidthHistory.clear()
         latestPaths = emptyList()
     }
 
@@ -673,6 +689,7 @@ class AdGuardProxyService : MqvpnVpnService() {
         dailyWifiKB = 0.0
         dailySimKB = 0.0
         pathTrafficAccumulator.reset()
+        bandwidthHistory.clear()
     }
 
     private fun createNotificationChannel() {
@@ -733,7 +750,11 @@ class AdGuardProxyService : MqvpnVpnService() {
         })
     }
 
-    private fun broadcastTrafficStats(totals: NetworkTrafficTotals) {
+    private fun broadcastTrafficStats(
+        totals: NetworkTrafficTotals,
+        wifiBps: Long,
+        simBps: Long,
+    ) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
             putExtra("wifi_tx_bytes", totals.wifiTx)
@@ -742,6 +763,8 @@ class AdGuardProxyService : MqvpnVpnService() {
             putExtra("sim_tx_bytes", totals.simTx)
             putExtra("sim_rx_bytes", totals.simRx)
             putExtra("sim_active", totals.simActive)
+            putExtra("wifi_bps", wifiBps)
+            putExtra("sim_bps", simBps)
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_PROXY)
             putExtra("daily_wifi_kb", dailyWifiKB)
             putExtra("daily_sim_kb", dailySimKB)

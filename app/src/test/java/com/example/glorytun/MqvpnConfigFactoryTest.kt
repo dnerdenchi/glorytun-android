@@ -8,14 +8,19 @@ import org.junit.Test
 
 class MqvpnConfigFactoryTest {
     @Test
-    fun defaultConfigPinsUdpFlowsToAvoidMultipathVideoReordering() {
+    fun defaultConfigMatchesTheSmoothOfficialAndroidPath() {
         val config = MqvpnConfigFactory.create(
             serverAddress = "203.0.113.10",
             serverPort = "443",
             authKey = "test-key"
         )
 
-        assertEquals(MqvpnConfig.Scheduler.WLB_UDP_PIN, config.scheduler)
+        assertEquals(MqvpnConfig.Scheduler.MIN_RTT, config.scheduler)
+        assertFalse(config.reorderEnabled)
+        assertEquals(MqvpnConfig.ReorderProfile.CELLULAR_BOND, config.reorderProfile)
+        assertEquals(listOf(443), config.reorderPorts)
+        assertFalse(config.hybridEnabled)
+        assertEquals(MqvpnConfig.HybridTcpMode.AUTO, config.hybridTcpMode)
     }
 
     @Test
@@ -39,5 +44,29 @@ class MqvpnConfigFactoryTest {
         )
 
         assertFalse(config.killSwitch)
+    }
+
+    @Test
+    fun explicitWlbSchedulerEnablesUdpPacketDistribution() {
+        val config = MqvpnConfigFactory.create(
+            serverAddress = "203.0.113.10",
+            serverPort = "443",
+            authKey = "test-key",
+            schedulerName = "WLB",
+        )
+
+        assertEquals(MqvpnConfig.Scheduler.WLB, config.scheduler)
+    }
+
+    @Test
+    fun unknownSchedulerFallsBackToOfficialMinRtt() {
+        val config = MqvpnConfigFactory.create(
+            serverAddress = "203.0.113.10",
+            serverPort = "443",
+            authKey = "test-key",
+            schedulerName = "unknown",
+        )
+
+        assertEquals(MqvpnConfig.Scheduler.MIN_RTT, config.scheduler)
     }
 }

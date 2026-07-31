@@ -67,7 +67,7 @@
             android:letterSpacing="0.1"
             android:layout_marginBottom="10dp" />
 
-        <!-- ボンディング高速化モード -->
+        <!-- 公式アプリ互換モード -->
         <LinearLayout
             android:id="@+id/card_bonding"
             android:layout_width="match_parent"
@@ -104,7 +104,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="ボンディング高速化"
+                        android:text="公式・自動"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -121,7 +121,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="WiFi と SIM を同時使用して最大速度を実現。両回線の帯域幅を合算します。"
+                    android:text="mqvpn公式アプリと同じ設定。MIN_RTT・Hybrid AUTO・UDP 443 Reorderで滑らかな通信を優先します。"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 
@@ -129,7 +129,7 @@
 
         </LinearLayout>
 
-        <!-- WiFi優先モード -->
+        <!-- 帯域集約モード -->
         <LinearLayout
             android:id="@+id/card_wifi_first"
             android:layout_width="match_parent"
@@ -159,7 +159,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="WiFi 優先モード"
+                    android:text="帯域集約モード"
                     android:textColor="@color/on_surface"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -168,7 +168,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="基本は WiFi を使用。WiFi 速度がしきい値を下回った場合に SIM を追加して補完します。"
+                    android:text="公式WLBスケジューラで複数経路へ配分します。回線品質差が小さい環境向けです。"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 
@@ -176,7 +176,7 @@
 
         </LinearLayout>
 
-        <!-- SIM優先モード -->
+        <!-- UDP安定モード -->
         <LinearLayout
             android:id="@+id/card_sim_first"
             android:layout_width="match_parent"
@@ -206,7 +206,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="SIM 優先モード"
+                    android:text="UDP安定モード"
                     android:textColor="@color/on_surface"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -215,7 +215,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="基本は SIM を使用。SIM 速度がしきい値を下回った場合に WiFi を追加して補完します。"
+                    android:text="公式WLB_UDP_PINでUDPフローを単一経路に固定し、並べ替えに弱い通信を安定させます。"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 

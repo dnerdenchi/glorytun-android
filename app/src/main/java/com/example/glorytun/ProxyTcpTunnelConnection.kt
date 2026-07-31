@@ -29,8 +29,8 @@ class ProxyTcpTunnelConnection(
     private val onClosed: (TcpTunnelKey) -> Unit
 ) {
     private data class PendingSegment(
-        val startSequence: Long,
         val endSequence: Long,
+        val sequenceLength: Int,
         val packet: ByteArray,
         var sentAtMs: Long,
         var retries: Int = 0
@@ -47,6 +47,7 @@ class ProxyTcpTunnelConnection(
     private val maxSegmentSize = min(DEFAULT_MSS, max(256, mtu - IPV4_TCP_HEADER_BYTES))
     private val initialSequence = System.nanoTime() and 0x7fffffffL
     private var sendNext = initialSequence
+    private var pendingByteCount = 0L
     private var receiveNext = 0L
     private var receiveReassembler: TcpReceiveReassembler? = null
     private var pendingRemoteFinSequence: Long? = null
@@ -103,7 +104,7 @@ class ProxyTcpTunnelConnection(
             }
 
             if (!established && (packet.flags and TcpFlags.SYN) != 0 && (packet.flags and TcpFlags.ACK) != 0) {
-                receiveNext = TcpReceiveReassembler.advance(packet.sequenceNumber, 1)
+                receiveNext = TcpSequence.advance(packet.sequenceNumber, 1)
                 receiveWindowScaleNegotiated = packet.options.windowScale != null
                 remoteWindowScale = packet.options.windowScale ?: 0
                 updateRemoteWindowLocked(packet)
@@ -128,13 +129,13 @@ class ProxyTcpTunnelConnection(
             }
 
             if ((packet.flags and TcpFlags.FIN) != 0) {
-                pendingRemoteFinSequence = TcpReceiveReassembler.advance(
+                pendingRemoteFinSequence = TcpSequence.advance(
                     packet.sequenceNumber,
                     packet.payload.size
                 )
             }
             if (pendingRemoteFinSequence == receiveNext) {
-                receiveNext = TcpReceiveReassembler.advance(receiveNext, 1)
+                receiveNext = TcpSequence.advance(receiveNext, 1)
                 pendingRemoteFinSequence = null
                 remoteClosed = true
                 sendAckLocked()
@@ -210,17 +211,29 @@ class ProxyTcpTunnelConnection(
             }
         )
         val sequenceLength = payload.size + if ((flags and (TcpFlags.SYN or TcpFlags.FIN)) != 0) 1 else 0
+        val segmentEnd = TcpSequence.advance(sendNext, sequenceLength)
         if (track && sequenceLength > 0) {
-            pendingSegments.add(PendingSegment(sendNext, sendNext + sequenceLength, packet, System.currentTimeMillis()))
+            pendingSegments.add(
+                PendingSegment(
+                    endSequence = segmentEnd,
+                    sequenceLength = sequenceLength,
+                    packet = packet,
+                    sentAtMs = System.currentTimeMillis(),
+                )
+            )
+            pendingByteCount += sequenceLength
         }
-        sendNext += sequenceLength
+        sendNext = segmentEnd
         packetSender(packet)
     }
 
     private fun removeAcknowledgedSegments(acknowledgement: Long) {
         var changed = false
-        while (pendingSegments.isNotEmpty() && pendingSegments.first.endSequence <= acknowledgement) {
-            pendingSegments.removeFirst()
+        while (
+            pendingSegments.isNotEmpty() &&
+            TcpSequence.isAcknowledged(pendingSegments.first.endSequence, acknowledgement)
+        ) {
+            pendingByteCount -= pendingSegments.removeFirst().sequenceLength
             changed = true
         }
         if (changed) lock.notifyAll()
@@ -240,9 +253,7 @@ class ProxyTcpTunnelConnection(
         }
     }
 
-    private fun pendingBytesLocked(): Long {
-        return pendingSegments.sumOf { it.endSequence - it.startSequence }
-    }
+    private fun pendingBytesLocked(): Long = pendingByteCount
 
     private fun allowedSendWindowBytesLocked(): Long {
         return min(SEND_WINDOW_LIMIT_BYTES.toLong(), remoteAdvertisedWindowBytes)
@@ -294,6 +305,7 @@ class ProxyTcpTunnelConnection(
     private fun closeLocked() {
         if (!active.getAndSet(false)) return
         pendingSegments.clear()
+        pendingByteCount = 0L
         establishedLatch.countDown()
         closedLatch.countDown()
         lock.notifyAll()

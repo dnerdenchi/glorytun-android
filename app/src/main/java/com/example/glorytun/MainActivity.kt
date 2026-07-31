@@ -86,7 +86,11 @@ class MainActivity : AppCompatActivity() {
                 wifiTx     = intent.getLongExtra("wifi_tx_bytes", 0L),
                 wifiRx     = intent.getLongExtra("wifi_rx_bytes", 0L),
                 simTx      = intent.getLongExtra("sim_tx_bytes",  0L),
-                simRx      = intent.getLongExtra("sim_rx_bytes",  0L)
+                simRx      = intent.getLongExtra("sim_rx_bytes",  0L),
+                measuredWifiBps = intent.getLongExtra("wifi_bps", -1L)
+                    .takeIf { it >= 0L },
+                measuredSimBps = intent.getLongExtra("sim_bps", -1L)
+                    .takeIf { it >= 0L },
             )
             val dailyWifi = intent.getDoubleExtra("daily_wifi_kb", -1.0)
             if (dailyWifi >= 0.0) {

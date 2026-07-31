@@ -5,7 +5,8 @@ BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mq
 ## 特徴
 
 - Android の VPN 機能を使って mqvpn トンネルへ接続します。
-- mqvpn の Multipath QUIC / WLB UDP flow pin scheduler により、動画通信の順序を保ちながら複数回線を利用します。
+- mqvpn 公式 Android v0.14.1 と同じ Multipath QUIC を使い、Hybrid TCP lane と UDP reorder にも対応します。
+- 既定の「公式・自動」は公式アプリと同じ `MIN_RTT` です。サーバー側対応が必要な Hybrid と reorder は、公式アプリの既定値と同じく無効です。
 - GitHub Releases の APK asset を参照するアプリ内更新機能を備えています。
 - 現在の native bridge は `arm64-v8a` 向けです。
 
@@ -13,12 +14,14 @@ BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mq
 
 | 項目 | 内容 |
 | --- | --- |
-| VPN エンジン | mqvpn v0.7.0 |
+| VPN エンジン | mqvpn v0.14.1 |
 | Android 側 | Kotlin + mqvpn Android SDK source |
 | Native 側 | mqvpn Android 向け `libmqvpn_jni.so` |
 | 対応 ABI | `arm64-v8a` |
 | 最小 Android | API 26 |
 | アプリ更新 | GitHub Releases の APK asset |
+
+`libmqvpn_jni.so` は [mqvpn v0.14.1公式Android APK](https://github.com/mp0rta/mqvpn/releases/tag/v0.14.1) に収録されたarm64-v8a版と同一です。元APKは公式 `SHA256SUMS` と照合しています。
 
 ## Android アプリのビルド
 

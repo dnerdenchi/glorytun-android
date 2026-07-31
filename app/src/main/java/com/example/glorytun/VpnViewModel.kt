@@ -86,7 +86,9 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         wifiTx: Long,
         wifiRx: Long,
         simTx: Long,
-        simRx: Long
+        simRx: Long,
+        measuredWifiBps: Long? = null,
+        measuredSimBps: Long? = null,
     ) {
         val nowMs = System.currentTimeMillis()
         val rates = trafficRateCalculator.update(
@@ -99,16 +101,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             simRx = simRx
         )
 
-        wifiKBs.value = rates.wifiKBs
-        simKBs.value = rates.simKBs
+        val sampledWifiKBs = measuredWifiBps?.div(8192f) ?: rates.wifiKBs
+        val sampledSimKBs = measuredSimBps?.div(8192f) ?: rates.simKBs
 
-        if (rates.wifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = rates.wifiKBs
-        if (rates.simKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = rates.simKBs
+        wifiKBs.value = sampledWifiKBs
+        simKBs.value = sampledSimKBs
 
-        trafficHistory.add(TrafficPoint(nowMs, rates.wifiKBs, rates.simKBs))
+        if (sampledWifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = sampledWifiKBs
+        if (sampledSimKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = sampledSimKBs
+
+        trafficHistory.add(TrafficPoint(nowMs, sampledWifiKBs, sampledSimKBs))
         while (trafficHistory.size > MAX_TRAFFIC_HISTORY_POINTS) trafficHistory.removeAt(0)
 
-        addRealtimePoint(rates.wifiKBs, rates.simKBs)
+        addRealtimePoint(sampledWifiKBs, sampledSimKBs)
 
         wifiTotalBytes.value = rates.wifiTotalBytes
         simTotalBytes.value = rates.simTotalBytes

@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -30,6 +31,7 @@ class MqvpnBondingService : MqvpnVpnService() {
 
     private var statsRunning = false
     private val pathTrafficAccumulator = PathTrafficAccumulator()
+    private val bandwidthHistory = BandwidthHistory(maxSamples = 1)
     private var dailyWifiKB = 0.0
     private var dailySimKB = 0.0
     private var monthlyWifiKB = 0.0
@@ -114,6 +116,10 @@ class MqvpnBondingService : MqvpnVpnService() {
             .addRoute("0.0.0.0", 0)
             .setMtu(info.mtu)
 
+        currentUnderlyingNetworks().takeIf { it.isNotEmpty() }?.let {
+            builder.setUnderlyingNetworks(it)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setBlocking(true)
         }
@@ -172,6 +178,13 @@ class MqvpnBondingService : MqvpnVpnService() {
 
     override fun onPathsUpdated(paths: List<PathInfo>) {
         latestPaths = paths
+    }
+
+    override fun onUnderlyingNetworksChanged(networks: Array<Network>) {
+        if (!isConnected) return
+        if (!setUnderlyingNetworks(networks)) {
+            Log.w(TAG, "Failed to update Android VPN underlying networks")
+        }
     }
 
     override fun onLog(level: Int, message: String) {
@@ -256,9 +269,22 @@ class MqvpnBondingService : MqvpnVpnService() {
             if (!statsRunning) return
 
             val trafficUpdate = pathTrafficAccumulator.update(latestPaths)
+            val bandwidthSample = bandwidthHistory
+                .onTick(latestPaths, System.nanoTime())
+                .lastOrNull()
+            val wifiBps = bandwidthSample?.perPathBps
+                ?.filterKeys { !isCellularInterface(it) }
+                ?.values
+                ?.sum()
+                ?: 0L
+            val simBps = bandwidthSample?.perPathBps
+                ?.filterKeys(::isCellularInterface)
+                ?.values
+                ?.sum()
+                ?: 0L
 
             updateUsageCounters(trafficUpdate.wifiDeltaKB, trafficUpdate.simDeltaKB)
-            broadcastStats(trafficUpdate.totals)
+            broadcastStats(trafficUpdate.totals, wifiBps, simBps)
 
             statsHandler.postDelayed(this, 1000)
         }
@@ -295,6 +321,7 @@ class MqvpnBondingService : MqvpnVpnService() {
 
     private fun resetStatsBaselines() {
         pathTrafficAccumulator.reset()
+        bandwidthHistory.clear()
         currentHourBucket = 0L
         hourlyWifiSum = 0f
         hourlySimSum = 0f
@@ -369,7 +396,7 @@ class MqvpnBondingService : MqvpnVpnService() {
         }
     }
 
-    private fun broadcastStats(totals: NetworkTrafficTotals) {
+    private fun broadcastStats(totals: NetworkTrafficTotals, wifiBps: Long, simBps: Long) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
             putExtra("wifi_tx_bytes", totals.wifiTx)
@@ -378,6 +405,8 @@ class MqvpnBondingService : MqvpnVpnService() {
             putExtra("sim_tx_bytes", totals.simTx)
             putExtra("sim_rx_bytes", totals.simRx)
             putExtra("sim_active", totals.simActive)
+            putExtra("wifi_bps", wifiBps)
+            putExtra("sim_bps", simBps)
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_VPN)
             putExtra("daily_wifi_kb", dailyWifiKB)
             putExtra("daily_sim_kb", dailySimKB)

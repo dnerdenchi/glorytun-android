@@ -4,10 +4,12 @@
 package com.mqvpn.sdk.core
 
 import android.content.Intent
+import android.net.Network
 import android.net.VpnService
 import android.os.Binder
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Log
 import com.mqvpn.sdk.core.internal.PathManager
 import com.mqvpn.sdk.core.internal.TunnelCallbacks
@@ -26,8 +28,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetAddress
 
@@ -59,24 +64,32 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     private var udpReaderPool: UdpReaderPool? = null
     private var pathManager: PathManager? = null
     private var networkMonitor: NetworkMonitor? = null
+    private var customPacketSender: QueuedTunPacketSender? = null
     private var currentConfig: MqvpnConfig? = null
     private var currentTunPfd: ParcelFileDescriptor? = null
+    @Volatile private var nativeClientLeaseHeld = false
+    @Volatile private var tunnelRequested = false
+    @Volatile private var serviceClosing = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val telemetryPollGate = TelemetryPollGate(TELEMETRY_POLL_INTERVAL_MS)
 
     // --- Lifecycle ---
 
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "Using official mqvpn native engine ${MqvpnSdk.getVersion()}")
         executor = MqvpnPoller(scope,
             tickFn = {
                 val t = tunnel
                 val result = t?.tick() ?: 0
-                // Poll stats/paths and push to MqvpnManager on each tick
-                if (t != null) {
+                // JNI telemetry allocates arrays; sample it independently of the hot engine tick.
+                if (t != null && telemetryPollGate.shouldPoll(SystemClock.elapsedRealtime())) {
                     val stats = t.getStats()
                     val paths = t.getPaths()
+                    val reorderStats = t.getReorderStats()
                     manager?.updateStats(stats)
                     manager?.updatePaths(paths)
+                    manager?.updateReorderStats(reorderStats)
                     onStatsUpdated(stats)
                     onPathsUpdated(paths)
                 }
@@ -91,6 +104,8 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     }
 
     override fun onDestroy() {
+        serviceClosing = true
+        tunnelRequested = false
         runBlocking {
             withTimeoutOrNull(2000) {
                 executor.call { cleanup() }
@@ -102,6 +117,8 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     }
 
     override fun onRevoke() {
+        serviceClosing = true
+        tunnelRequested = false
         runBlocking {
             withTimeoutOrNull(2000) {
                 executor.call { cleanup() }
@@ -120,9 +137,85 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
      */
     protected fun startTunnel(config: MqvpnConfig) {
         currentConfig = config
-        executor.enqueue {
-            val t = MqvpnTunnel.create(config, this)
-            tunnel = t
+        tunnelRequested = true
+        telemetryPollGate.reset()
+        scope.launch(Dispatchers.IO) {
+            val acquired = runInterruptible {
+                MqvpnNativeClientLease.processWide.acquire(
+                    this@MqvpnVpnService,
+                    NATIVE_CLIENT_LEASE_TIMEOUT_MS,
+                )
+            }
+            if (!acquired) {
+                if (isActive && tunnelRequested && !serviceClosing) {
+                    executor.enqueue {
+                        if (!tunnelRequested || serviceClosing) return@enqueue
+                        tunnelRequested = false
+                        Log.e(TAG, "Timed out waiting for the previous mqvpn client to stop")
+                        emitState(
+                            MqvpnState.Error(
+                                MqvpnError.EngineError(
+                                    NATIVE_CLIENT_BUSY_ERROR,
+                                    "Previous mqvpn session is still stopping",
+                                )
+                            )
+                        )
+                    }
+                }
+                return@launch
+            }
+            nativeClientLeaseHeld = true
+
+            if (!isActive || !tunnelRequested || serviceClosing) {
+                releaseNativeClientLease()
+                return@launch
+            }
+
+            executor.enqueue {
+                if (!tunnelRequested || serviceClosing) {
+                    releaseNativeClientLease()
+                    return@enqueue
+                }
+                initializeTunnel(config)
+            }
+        }
+    }
+
+    private fun initializeTunnel(config: MqvpnConfig) {
+        Log.i(
+            TAG,
+            "Starting official mqvpn config: scheduler=${config.scheduler}, " +
+                "hybrid=${config.hybridEnabled}/${config.hybridTcpMode}, " +
+                "reorder=${config.reorderEnabled}/${config.reorderProfile}/${config.reorderPorts}",
+        )
+        val t = try {
+            MqvpnTunnel.create(config, this)
+        } catch (error: Throwable) {
+            tunnelRequested = false
+            releaseNativeClientLease()
+            Log.e(TAG, "Failed to create mqvpn client", error)
+            emitState(
+                MqvpnState.Error(
+                    MqvpnError.EngineError(
+                        NATIVE_CLIENT_CREATE_ERROR,
+                        error.message ?: "Failed to create mqvpn client",
+                    )
+                )
+            )
+            return
+        }
+        tunnel = t
+
+        try {
+            customPacketSender = QueuedTunPacketSender(
+                sendPacket = { frame, length ->
+                    executor.call { tunnel?.onTunPacket(frame, 0, length) ?: 0 }
+                },
+                isWritable = {
+                    executor.call { tunnel?.getInterest()?.tunReadable == true }
+                },
+                waitForNextCheck = { delay(CUSTOM_PACKET_RETRY_MS) },
+            ).also { it.start(scope) }
 
             val pool = UdpReaderPool(executor)
             udpReaderPool = pool
@@ -139,10 +232,25 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
             pathManager = pm
 
             monitor.start { event ->
-                scope.launch(Dispatchers.IO) { pm.handleEvent(event) }
+                scope.launch(Dispatchers.IO) {
+                    pm.handleEvent(event)
+                    onUnderlyingNetworksChanged(monitor.preferredNetworks())
+                }
             }
 
             emitState(MqvpnState.Connecting)
+        } catch (error: Throwable) {
+            tunnelRequested = false
+            Log.e(TAG, "Failed to initialize mqvpn client", error)
+            cleanup()
+            emitState(
+                MqvpnState.Error(
+                    MqvpnError.EngineError(
+                        NATIVE_CLIENT_CREATE_ERROR,
+                        error.message ?: "Failed to initialize mqvpn client",
+                    )
+                )
+            )
         }
     }
 
@@ -151,28 +259,52 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
      * Do NOT call from onDestroy — cleanup runs automatically.
      */
     internal fun stopTunnel() {
+        tunnelRequested = false
         executor.enqueue { cleanup() }
     }
 
     // --- Internal cleanup (idempotent) ---
 
     private fun cleanup() {
-        if (tunnel == null) return // already cleaned up
-        networkMonitor?.stop()
-        tunnelBridge?.stop()
-        udpReaderPool?.stopAll()
-        tunnel?.disconnect()
-        tunnel?.tick() // send CONNECTION_CLOSE
-        tunnel?.destroy()
-        pathManager?.closeAllFds()
-        currentTunPfd?.close()
+        tunnelRequested = false
+        val activeTunnel = tunnel ?: run {
+            releaseNativeClientLease()
+            return
+        }
+        runCatching { networkMonitor?.stop() }
+            .onFailure { Log.w(TAG, "Network monitor stop failed", it) }
+        runCatching { customPacketSender?.stop() }
+            .onFailure { Log.w(TAG, "Packet sender stop failed", it) }
+        runCatching { tunnelBridge?.stop() }
+            .onFailure { Log.w(TAG, "Tunnel bridge stop failed", it) }
+        runCatching { udpReaderPool?.stopAll() }
+            .onFailure { Log.w(TAG, "UDP reader stop failed", it) }
+        runCatching { activeTunnel.disconnect() }
+            .onFailure { Log.w(TAG, "mqvpn disconnect failed", it) }
+        runCatching { activeTunnel.tick() }
+            .onFailure { Log.w(TAG, "mqvpn final tick failed", it) }
+        val nativeClientDestroyed = runCatching { activeTunnel.destroy() }
+            .onFailure { Log.e(TAG, "mqvpn native client destroy failed", it) }
+            .isSuccess
+        runCatching { pathManager?.closeAllFds() }
+            .onFailure { Log.w(TAG, "Path fd cleanup failed", it) }
+        runCatching { currentTunPfd?.close() }
+            .onFailure { Log.w(TAG, "TUN fd close failed", it) }
         tunnel = null
         tunnelBridge = null
         udpReaderPool = null
         pathManager = null
         networkMonitor = null
+        customPacketSender = null
         currentTunPfd = null
+        if (nativeClientDestroyed) releaseNativeClientLease()
         emitState(MqvpnState.Disconnected)
+    }
+
+    private fun releaseNativeClientLease() {
+        if (!nativeClientLeaseHeld) return
+        nativeClientLeaseHeld = false
+        MqvpnNativeClientLease.processWide.release(this)
     }
 
     // --- TunnelCallbacks implementation ---
@@ -240,7 +372,8 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     }
 
     override fun onNativePathEvent(pathHandle: Long, newStatus: Int) {
-        // Path changes are picked up by stats/paths polling in tickFn
+        // Poll after tick() returns; calling JNI again from this callback would re-enter native code.
+        telemetryPollGate.requestImmediatePoll()
     }
 
     override fun onNativeLog(level: Int, message: String) {
@@ -282,6 +415,7 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     open fun onReconnectScheduled(delaySec: Int) {}
     open fun onStatsUpdated(stats: VpnStats) {}
     open fun onPathsUpdated(paths: List<PathInfo>) {}
+    protected open fun onUnderlyingNetworksChanged(networks: Array<Network>) {}
 
     /**
      * Subclasses that do not use an Android TUN fd can provide their own
@@ -291,12 +425,11 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
 
     protected open fun onTunFdReady(tunPfd: ParcelFileDescriptor, mtu: Int) {}
 
-    protected fun sendTunPacket(packet: ByteArray, length: Int = packet.size) {
-        val frame = if (length == packet.size) packet.copyOf() else packet.copyOf(length)
-        executor.enqueue {
-            tunnel?.onTunPacket(frame, 0, frame.size)
-        }
-    }
+    protected fun currentUnderlyingNetworks(): Array<Network> =
+        networkMonitor?.preferredNetworks() ?: emptyArray()
+
+    protected fun sendTunPacket(packet: ByteArray, length: Int = packet.size): Boolean =
+        customPacketSender?.enqueue(packet, length) == true
 
     // --- Helpers ---
 
@@ -309,5 +442,10 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     companion object {
         private const val TAG = "MqvpnVpnService"
         private const val DEFAULT_RECONNECT_INTERVAL_SEC = 5
+        private const val CUSTOM_PACKET_RETRY_MS = 2L
+        private const val NATIVE_CLIENT_LEASE_TIMEOUT_MS = 10_000L
+        private const val NATIVE_CLIENT_BUSY_ERROR = -1001
+        private const val NATIVE_CLIENT_CREATE_ERROR = -1002
+        private const val TELEMETRY_POLL_INTERVAL_MS = 500L
     }
 }

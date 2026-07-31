@@ -148,15 +148,10 @@ class SettingsFragment : Fragment() {
 
     private fun updateNetworkModeSubtitle(view: View) {
         val prefs = requireContext().getSharedPreferences(
-            NetworkProtocolFragment.PREFS_NAME, Context.MODE_PRIVATE
+            MqvpnRoutingMode.PREFS_NAME, Context.MODE_PRIVATE
         )
-        val mode = prefs.getString(NetworkProtocolFragment.KEY_MODE, NetworkProtocolFragment.MODE_BONDING)
-        val label = when (mode) {
-            NetworkProtocolFragment.MODE_BONDING    -> "ボンディング高速化 (推奨)"
-            NetworkProtocolFragment.MODE_WIFI_FIRST -> "WiFi 優先モード"
-            NetworkProtocolFragment.MODE_SIM_FIRST  -> "SIM 優先モード"
-            else -> "bonding モード・優先順位"
-        }
+        val mode = prefs.getString(MqvpnRoutingMode.KEY_MODE, MqvpnRoutingMode.BALANCED)
+        val label = "${MqvpnRoutingMode.displayName(mode)}送信モード"
         view.findViewById<android.widget.TextView>(R.id.tv_network_mode_subtitle)?.text = label
     }
 }

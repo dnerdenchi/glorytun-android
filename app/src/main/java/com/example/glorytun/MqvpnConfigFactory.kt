@@ -12,7 +12,7 @@ object MqvpnConfigFactory {
     const val EXTRA_SCHEDULER = "SCHEDULER"
 
     const val DEFAULT_PORT = "443"
-    const val DEFAULT_SCHEDULER = "WLB_UDP_PIN"
+    const val DEFAULT_SCHEDULER = "MIN_RTT"
     const val DEFAULT_ALLOW_INSECURE = true
     const val DEFAULT_KILL_SWITCH = true
 
@@ -56,31 +56,36 @@ object MqvpnConfigFactory {
             dnsServers = listOf(
                 GlorytunConstants.DEFAULT_DNS_PRIMARY,
                 GlorytunConstants.DEFAULT_DNS_SECONDARY
-            )
+            ),
+            // Match the official Android app defaults. Both features require
+            // explicit server-side support and are intentionally opt-in.
+            reorderEnabled = false,
+            reorderProfile = MqvpnConfig.ReorderProfile.CELLULAR_BOND,
+            reorderPorts = listOf(443),
+            hybridEnabled = false,
+            hybridTcpMode = MqvpnConfig.HybridTcpMode.AUTO,
         )
     }
 
     private fun schedulerNameForCurrentMode(context: Context): String {
         val mode = context.getSharedPreferences(
-            NetworkProtocolFragment.PREFS_NAME,
+            MqvpnRoutingMode.PREFS_NAME,
             Context.MODE_PRIVATE
         ).getString(
-            NetworkProtocolFragment.KEY_MODE,
-            NetworkProtocolFragment.MODE_BONDING
+            MqvpnRoutingMode.KEY_MODE,
+            MqvpnRoutingMode.BALANCED
         )
 
-        return when (mode) {
-            NetworkProtocolFragment.MODE_BONDING -> "WLB_UDP_PIN"
-            else -> "MIN_RTT"
-        }
+        return MqvpnRoutingMode.scheduler(mode).name
     }
 
     private fun schedulerFromName(value: String): MqvpnConfig.Scheduler {
         return when (value.trim().uppercase()) {
             "MINRTT", "MIN_RTT" -> MqvpnConfig.Scheduler.MIN_RTT
+            "WLB" -> MqvpnConfig.Scheduler.WLB
             "WLB_UDP_PIN" -> MqvpnConfig.Scheduler.WLB_UDP_PIN
             "BACKUP_FEC" -> MqvpnConfig.Scheduler.BACKUP_FEC
-            else -> MqvpnConfig.Scheduler.WLB
+            else -> MqvpnConfig.Scheduler.MIN_RTT
         }
     }
 }
