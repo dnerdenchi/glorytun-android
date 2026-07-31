@@ -43,6 +43,9 @@ class MqvpnTunnel internal constructor(
     fun removePath(pathHandle: Long): Int =
         NativeBridge.removePath(clientHandle, pathHandle)
 
+    fun setPathRateLimit(pathHandle: Long, bytesPerSecond: Long): Int =
+        NativeBridge.setPathRateLimit(clientHandle, pathHandle, bytesPerSecond)
+
     // --- I/O feed ---
 
     fun onTunPacket(data: ByteArray, offset: Int, length: Int): Int =

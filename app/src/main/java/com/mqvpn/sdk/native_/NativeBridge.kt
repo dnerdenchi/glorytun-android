@@ -132,6 +132,9 @@ object NativeBridge {
     /** mqvpn_client_remove_path(client, pathHandle) */
     external fun removePath(client: Long, pathHandle: Long): Int
 
+    /** mqvpn_client_set_path_rate_limit(client, pathHandle, bytesPerSecond) */
+    external fun setPathRateLimit(client: Long, pathHandle: Long, bytesPerSecond: Long): Int
+
     // ---- I/O feed ----
 
     /**

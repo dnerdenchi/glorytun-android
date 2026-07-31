@@ -431,6 +431,10 @@ abstract class MqvpnVpnService : VpnService(), TunnelCallbacks {
     protected fun sendTunPacket(packet: ByteArray, length: Int = packet.size): Boolean =
         customPacketSender?.enqueue(packet, length) == true
 
+    protected fun setPathRateLimits(rateLimits: Map<Long, Long>) {
+        pathManager?.updatePathRateLimits(rateLimits)
+    }
+
     // --- Helpers ---
 
     private fun formatIp4(bytes: ByteArray): String =

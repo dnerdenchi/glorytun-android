@@ -18,11 +18,11 @@ import com.mqvpn.sdk.core.model.MqvpnConfig
 import com.mqvpn.sdk.core.model.MqvpnState
 import com.mqvpn.sdk.core.model.PathInfo
 import com.mqvpn.sdk.core.model.TunnelInfo
-import java.util.Calendar
 
 class MqvpnBondingService : MqvpnVpnService() {
 
     private lateinit var trafficDataStore: TrafficDataStore
+    private lateinit var bandwidthEnforcer: BandwidthEnforcer
     private val statsHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var latestPaths: List<PathInfo> = emptyList()
@@ -40,12 +40,13 @@ class MqvpnBondingService : MqvpnVpnService() {
     private var hourlyWifiSum = 0f
     private var hourlySimSum = 0f
     private var hourlySampleCount = 0
-    private var lastDayStartMs = 0L
-    private var lastMonthStartMs = 0L
+    private var wifiLimited = false
+    private var simLimited = false
 
     override fun onCreate() {
         super.onCreate()
         trafficDataStore = TrafficDataStore(this)
+        bandwidthEnforcer = BandwidthEnforcer(this, ::setPathRateLimits)
         createNotificationChannel()
     }
 
@@ -261,6 +262,7 @@ class MqvpnBondingService : MqvpnVpnService() {
         statsRunning = false
         statsHandler.removeCallbacks(statsRunnable)
         saveCurrentHour()
+        bandwidthEnforcer.stop()
         resetStatsBaselines()
     }
 
@@ -284,6 +286,17 @@ class MqvpnBondingService : MqvpnVpnService() {
                 ?: 0L
 
             updateUsageCounters(trafficUpdate.wifiDeltaKB, trafficUpdate.simDeltaKB)
+            val bandwidthStatus = bandwidthEnforcer.onTick(
+                latestPaths,
+                trafficUpdate.wifiDeltaKB,
+                trafficUpdate.simDeltaKB,
+            )
+            dailyWifiKB = bandwidthStatus.usage.dailyWifiBytes / 1_024.0
+            dailySimKB = bandwidthStatus.usage.dailySimBytes / 1_024.0
+            monthlyWifiKB = bandwidthStatus.usage.monthlyWifiBytes / 1_024.0
+            monthlySimKB = bandwidthStatus.usage.monthlySimBytes / 1_024.0
+            wifiLimited = bandwidthStatus.wifiLimited
+            simLimited = bandwidthStatus.simLimited
             broadcastStats(trafficUpdate.totals, wifiBps, simBps)
 
             statsHandler.postDelayed(this, 1000)
@@ -293,30 +306,13 @@ class MqvpnBondingService : MqvpnVpnService() {
     private fun initializeUsageCounters() {
         resetStatsBaselines()
 
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        lastDayStartMs = cal.timeInMillis
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        lastMonthStartMs = cal.timeInMillis
-
-        dailyWifiKB = 0.0
-        dailySimKB = 0.0
-        monthlyWifiKB = 0.0
-        monthlySimKB = 0.0
-
-        trafficDataStore.load().forEach { point ->
-            if (point.timestamp >= lastDayStartMs) {
-                dailyWifiKB += point.wifiKBs * 3600.0
-                dailySimKB += point.simKBs * 3600.0
-            }
-            if (point.timestamp >= lastMonthStartMs) {
-                monthlyWifiKB += point.wifiKBs * 3600.0
-                monthlySimKB += point.simKBs * 3600.0
-            }
-        }
+        val bandwidthStatus = bandwidthEnforcer.onTick(latestPaths, 0f, 0f)
+        dailyWifiKB = bandwidthStatus.usage.dailyWifiBytes / 1_024.0
+        dailySimKB = bandwidthStatus.usage.dailySimBytes / 1_024.0
+        monthlyWifiKB = bandwidthStatus.usage.monthlyWifiBytes / 1_024.0
+        monthlySimKB = bandwidthStatus.usage.monthlySimBytes / 1_024.0
+        wifiLimited = bandwidthStatus.wifiLimited
+        simLimited = bandwidthStatus.simLimited
     }
 
     private fun resetStatsBaselines() {
@@ -329,13 +325,7 @@ class MqvpnBondingService : MqvpnVpnService() {
     }
 
     private fun updateUsageCounters(wifiDeltaKB: Float, simDeltaKB: Float) {
-        dailyWifiKB += wifiDeltaKB
-        dailySimKB += simDeltaKB
-        monthlyWifiKB += wifiDeltaKB
-        monthlySimKB += simDeltaKB
-
         val nowMs = System.currentTimeMillis()
-        checkTimeBoundary(nowMs)
         val nowHour = nowMs / GlorytunConstants.MILLIS_IN_HOUR
         if (currentHourBucket == 0L) currentHourBucket = nowHour
         if (nowHour != currentHourBucket) {
@@ -371,31 +361,6 @@ class MqvpnBondingService : MqvpnVpnService() {
         hourlySampleCount = 0
     }
 
-    private fun checkTimeBoundary(nowMs: Long) {
-        val cal = Calendar.getInstance().apply {
-            timeInMillis = nowMs
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-
-        val dayStart = cal.timeInMillis
-        if (dayStart > lastDayStartMs) {
-            lastDayStartMs = dayStart
-            dailyWifiKB = 0.0
-            dailySimKB = 0.0
-        }
-
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        val monthStart = cal.timeInMillis
-        if (monthStart > lastMonthStartMs) {
-            lastMonthStartMs = monthStart
-            monthlyWifiKB = 0.0
-            monthlySimKB = 0.0
-        }
-    }
-
     private fun broadcastStats(totals: NetworkTrafficTotals, wifiBps: Long, simBps: Long) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
@@ -410,8 +375,8 @@ class MqvpnBondingService : MqvpnVpnService() {
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_VPN)
             putExtra("daily_wifi_kb", dailyWifiKB)
             putExtra("daily_sim_kb", dailySimKB)
-            putExtra("wifi_throttled", false)
-            putExtra("sim_throttled", false)
+            putExtra("wifi_throttled", wifiLimited)
+            putExtra("sim_throttled", simLimited)
         })
     }
 

@@ -130,17 +130,19 @@ class SettingsFragment : Fragment() {
 
     private fun updateBandwidthSubtitle(view: View) {
         val prefs = requireContext().getSharedPreferences(GlorytunConstants.PREFS_BANDWIDTH, Context.MODE_PRIVATE)
+        val wifiAlways  = prefs.getBoolean(GlorytunConstants.KEY_WIFI_ALWAYS_ENABLED, false)
         val wifiMonthly = prefs.getBoolean(GlorytunConstants.KEY_WIFI_MONTHLY_ENABLED, false)
         val wifiDaily   = prefs.getBoolean(GlorytunConstants.KEY_WIFI_DAILY_ENABLED,   false)
+        val simAlways   = prefs.getBoolean(GlorytunConstants.KEY_SIM_ALWAYS_ENABLED, false)
         val simMonthly  = prefs.getBoolean(GlorytunConstants.KEY_SIM_MONTHLY_ENABLED,  false)
         val simDaily    = prefs.getBoolean(GlorytunConstants.KEY_SIM_DAILY_ENABLED,    false)
-        val anyEnabled  = wifiMonthly || wifiDaily || simMonthly || simDaily
+        val anyEnabled  = wifiAlways || wifiMonthly || wifiDaily || simAlways || simMonthly || simDaily
         val label = if (!anyEnabled) {
             "制限なし"
         } else {
             buildList {
-                if (wifiMonthly || wifiDaily) add("WiFi")
-                if (simMonthly  || simDaily)  add("SIM")
+                if (wifiAlways || wifiMonthly || wifiDaily) add("Wi-Fi")
+                if (simAlways || simMonthly || simDaily) add("SIM")
             }.joinToString("・") + " 制限 有効"
         }
         view.findViewById<TextView>(R.id.tv_bandwidth_subtitle)?.text = label

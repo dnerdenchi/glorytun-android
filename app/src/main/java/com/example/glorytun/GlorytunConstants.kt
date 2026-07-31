@@ -39,6 +39,8 @@ object GlorytunConstants {
     const val KEY_WIFI_MONTHLY_ENABLED  = "wifi_monthly_enabled"
     const val KEY_WIFI_MONTHLY_LIMIT_GB = "wifi_monthly_limit_gb"
     const val KEY_WIFI_MONTHLY_THROTTLE = "wifi_monthly_throttle_mbps"
+    const val KEY_WIFI_ALWAYS_ENABLED   = "wifi_always_enabled"
+    const val KEY_WIFI_ALWAYS_THROTTLE  = "wifi_always_throttle_kbps"
 
     const val KEY_WIFI_DAILY_ENABLED    = "wifi_daily_enabled"
     const val KEY_WIFI_DAILY_LIMIT_MB   = "wifi_daily_limit_mb"
@@ -47,6 +49,8 @@ object GlorytunConstants {
     const val KEY_SIM_MONTHLY_ENABLED   = "sim_monthly_enabled"
     const val KEY_SIM_MONTHLY_LIMIT_GB  = "sim_monthly_limit_gb"
     const val KEY_SIM_MONTHLY_THROTTLE  = "sim_monthly_throttle_mbps"
+    const val KEY_SIM_ALWAYS_ENABLED    = "sim_always_enabled"
+    const val KEY_SIM_ALWAYS_THROTTLE   = "sim_always_throttle_kbps"
 
     const val KEY_SIM_DAILY_ENABLED     = "sim_daily_enabled"
     const val KEY_SIM_DAILY_LIMIT_MB    = "sim_daily_limit_mb"
@@ -54,6 +58,7 @@ object GlorytunConstants {
 
     const val BW_DEFAULT_MONTHLY_LIMIT_GB  = 30
     const val BW_DEFAULT_THROTTLE_MBPS     = 1
+    const val BW_DEFAULT_THROTTLE_KBPS     = 1_000
     const val BW_DEFAULT_DAILY_LIMIT_MB    = 1000
     
     // --- Cache ---

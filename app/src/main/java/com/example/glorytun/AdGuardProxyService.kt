@@ -55,6 +55,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val pairShareUdpAssociations = ConcurrentHashMap.newKeySet<PairShareUdpAssociation>()
     private val pathTrafficAccumulator = PathTrafficAccumulator()
     private val bandwidthHistory = BandwidthHistory(maxSamples = 1)
+    private lateinit var bandwidthEnforcer: BandwidthEnforcer
 
     @Volatile private var serverSocket: ServerSocket? = null
     @Volatile private var localAddress: Inet4Address? = null
@@ -64,6 +65,8 @@ class AdGuardProxyService : MqvpnVpnService() {
     @Volatile private var latestPaths: List<PathInfo> = emptyList()
     @Volatile private var dailyWifiKB = 0.0
     @Volatile private var dailySimKB = 0.0
+    @Volatile private var wifiLimited = false
+    @Volatile private var simLimited = false
     @Volatile private var pairShareMode = false
 
     private val statsRunnable = object : Runnable {
@@ -83,8 +86,15 @@ class AdGuardProxyService : MqvpnVpnService() {
                 ?.values
                 ?.sum()
                 ?: 0L
-            dailyWifiKB += trafficUpdate.wifiDeltaKB
-            dailySimKB += trafficUpdate.simDeltaKB
+            val bandwidthStatus = bandwidthEnforcer.onTick(
+                latestPaths,
+                trafficUpdate.wifiDeltaKB,
+                trafficUpdate.simDeltaKB,
+            )
+            dailyWifiKB = bandwidthStatus.usage.dailyWifiBytes / 1_024.0
+            dailySimKB = bandwidthStatus.usage.dailySimBytes / 1_024.0
+            wifiLimited = bandwidthStatus.wifiLimited
+            simLimited = bandwidthStatus.simLimited
             broadcastTrafficStats(trafficUpdate.totals, wifiBps, simBps)
             statsHandler.postDelayed(this, 1000)
         }
@@ -92,6 +102,7 @@ class AdGuardProxyService : MqvpnVpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        bandwidthEnforcer = BandwidthEnforcer(this, ::setPathRateLimits)
         createNotificationChannel()
     }
 
@@ -671,14 +682,18 @@ class AdGuardProxyService : MqvpnVpnService() {
     private fun startStats() {
         pathTrafficAccumulator.reset()
         bandwidthHistory.clear()
-        dailyWifiKB = 0.0
-        dailySimKB = 0.0
+        val bandwidthStatus = bandwidthEnforcer.onTick(latestPaths, 0f, 0f)
+        dailyWifiKB = bandwidthStatus.usage.dailyWifiBytes / 1_024.0
+        dailySimKB = bandwidthStatus.usage.dailySimBytes / 1_024.0
+        wifiLimited = bandwidthStatus.wifiLimited
+        simLimited = bandwidthStatus.simLimited
         statsHandler.removeCallbacks(statsRunnable)
         statsHandler.post(statsRunnable)
     }
 
     private fun stopStats() {
         statsHandler.removeCallbacks(statsRunnable)
+        bandwidthEnforcer.stop()
         pathTrafficAccumulator.reset()
         bandwidthHistory.clear()
         latestPaths = emptyList()
@@ -768,8 +783,8 @@ class AdGuardProxyService : MqvpnVpnService() {
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_PROXY)
             putExtra("daily_wifi_kb", dailyWifiKB)
             putExtra("daily_sim_kb", dailySimKB)
-            putExtra("wifi_throttled", false)
-            putExtra("sim_throttled", false)
+            putExtra("wifi_throttled", wifiLimited)
+            putExtra("sim_throttled", simLimited)
         })
     }
 

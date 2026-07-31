@@ -21,7 +21,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 internal class UdpReaderPool(private val executor: MqvpnExecutor) {
 
-    private data class ReaderEntry(val thread: Thread, val fd: Int)
+    private data class ReaderEntry(
+        val thread: Thread,
+        val fd: Int,
+        val rateLimiter: PathRateLimiter,
+    )
 
     private val readers = ConcurrentHashMap<Long, ReaderEntry>()
 
@@ -31,6 +35,7 @@ internal class UdpReaderPool(private val executor: MqvpnExecutor) {
      * Loop: recvFrom(fd, buf, peerAddr) → executor.enqueue { onSocketRecv(...) }
      */
     fun startReader(fd: Int, pathHandle: Long, name: String, tunnel: MqvpnTunnel) {
+        val rateLimiter = PathRateLimiter()
         val thread = Thread({
             val buf = ByteArray(65536)
             val peerAddr = ByteArray(128) // sockaddr_storage
@@ -41,6 +46,7 @@ internal class UdpReaderPool(private val executor: MqvpnExecutor) {
                 val n = NativeBridge.recvFrom(fd, buf, 0, buf.size, peerAddr, peerAddrLen)
                 if (n <= 0) break // shutdown or error
 
+                rateLimiter.acquire(n)
                 val pktCopy = buf.copyOf(n)
                 val addrCopy = peerAddr.copyOf(peerAddrLen[0])
                 val addrLen = peerAddrLen[0]
@@ -52,8 +58,12 @@ internal class UdpReaderPool(private val executor: MqvpnExecutor) {
             Log.d(TAG, "UDP reader $name stopped")
         }, "mqvpn-udp-$name")
 
-        readers[pathHandle] = ReaderEntry(thread, fd)
+        readers[pathHandle] = ReaderEntry(thread, fd, rateLimiter)
         thread.start()
+    }
+
+    fun updateRateLimit(pathHandle: Long, bytesPerSecond: Long) {
+        readers[pathHandle]?.rateLimiter?.updateRate(bytesPerSecond)
     }
 
     /**

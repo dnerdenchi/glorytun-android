@@ -11,6 +11,7 @@ import com.mqvpn.sdk.network.NetworkEvent
 import com.mqvpn.sdk.network.NetworkMonitor
 import com.mqvpn.sdk.network.PathBinder
 import com.mqvpn.sdk.runtime.MqvpnExecutor
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Bridges [NetworkEvent]s from NetworkMonitor to libmqvpn path management.
@@ -34,8 +35,9 @@ internal class PathManager(
         },
 ) {
     private var connected = false
-    private val pathHandles = mutableMapOf<Network, Long>()  // network → pathHandle
-    private val pathFds = mutableMapOf<Long, Int>()           // pathHandle → fd
+    private val pathHandles = ConcurrentHashMap<Network, Long>() // network → pathHandle
+    private val pathFds = ConcurrentHashMap<Long, Int>() // pathHandle → fd
+    private val pathRateLimits = ConcurrentHashMap<Long, Long>()
 
     /**
      * Handle a network event. Must be called from IO dispatcher.
@@ -111,6 +113,7 @@ internal class PathManager(
         }
 
         if (handle < 0) return
+        pathRateLimits.remove(handle)
 
         // Step 2: Stop reader (shutdown, NOT close)
         udpReaderPool.stopReader(handle)
@@ -127,7 +130,32 @@ internal class PathManager(
         }
         pathFds.clear()
         pathHandles.clear()
+        pathRateLimits.clear()
         connected = false
+    }
+
+    /**
+     * Applies the same cap to both directions of each path.
+     * Downlink is shaped before packets enter libmqvpn; uplink is shaped
+     * inside libmqvpn before each UDP send.
+     */
+    fun updatePathRateLimits(rateLimits: Map<Long, Long>) {
+        pathRateLimits.keys.retainAll(rateLimits.keys)
+        rateLimits.forEach { (handle, rate) ->
+            val normalized = rate.coerceAtLeast(0L)
+            pathRateLimits[handle] = normalized
+            if (pathFds.containsKey(handle)) applyPathRateLimit(handle, normalized)
+        }
+    }
+
+    private fun applyPathRateLimit(handle: Long, bytesPerSecond: Long) {
+        udpReaderPool.updateRateLimit(handle, bytesPerSecond)
+        executor.enqueue {
+            val result = tunnel.setPathRateLimit(handle, bytesPerSecond)
+            if (result != 0) {
+                Log.w(TAG, "Native rate limit failed for path=$handle: $result")
+            }
+        }
     }
 
     private fun closeFdSafe(fd: Int) {
