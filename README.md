@@ -6,7 +6,7 @@ BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mq
 
 - Android の VPN 機能を使って mqvpn トンネルへ接続します。
 - mqvpn 公式 Android v0.14.1 と同じ Multipath QUIC を使い、Hybrid TCP lane と UDP reorder にも対応します。
-- 既定の「公式・自動」は公式アプリと同じ `MIN_RTT` です。サーバー側対応が必要な Hybrid と reorder は、公式アプリの既定値と同じく無効です。
+- 既定の「帯域集約モード」は公式推奨の `WLB` です。サーバー側も有効化した Hybrid `AUTO` と UDP 443 `CELLULAR_BOND` reorderで、TCP・QUICの多経路集約を補助します。
 - GitHub Releases の APK asset を参照するアプリ内更新機能を備えています。
 - 現在の native bridge は `arm64-v8a` 向けです。
 
@@ -176,6 +176,16 @@ sudo systemctl restart mqvpn-server
 ## サーバー設定の変更
 
 サーバー設定は `/etc/mqvpn/server.conf` にあります。変更後は service を再起動してください。
+
+WLB・Hybrid・UDP 443 Reorder をまとめて有効化する場合は、付属スクリプトをサーバーへ転送して実行します。既存設定をバックアップし、再起動後に service と UDP 443 を確認できなければ自動で元へ戻します。
+
+```bash
+sudo ./server/enable-mqvpn-wlb-hybrid-reorder.sh
+```
+
+Hybrid はクライアントとサーバーの両方で有効にする必要があります。Reorder は内側 UDP 443 のみに `cellular_bond` プロファイルを適用し、DNS やリアルタイム UDP には待ち時間を追加しません。
+
+手動で変更する場合:
 
 ```bash
 sudo nano /etc/mqvpn/server.conf

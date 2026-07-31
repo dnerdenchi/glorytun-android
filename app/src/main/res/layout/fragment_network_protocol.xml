@@ -67,7 +67,7 @@
             android:letterSpacing="0.1"
             android:layout_marginBottom="10dp" />
 
-        <!-- 公式アプリ互換モード -->
+        <!-- 帯域集約モード -->
         <LinearLayout
             android:id="@+id/card_bonding"
             android:layout_width="match_parent"
@@ -104,7 +104,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="公式・自動"
+                        android:text="帯域集約モード"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -121,7 +121,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="mqvpn公式アプリと同じ設定。MIN_RTT・Hybrid AUTO・UDP 443 Reorderで滑らかな通信を優先します。"
+                    android:text="公式WLBでWi-FiとSIMへ通信を配分します。Hybrid AUTOとUDP 443 ReorderでTCP・QUICの多経路集約を補助します。"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 
@@ -129,7 +129,7 @@
 
         </LinearLayout>
 
-        <!-- 帯域集約モード -->
+        <!-- 低遅延モード -->
         <LinearLayout
             android:id="@+id/card_wifi_first"
             android:layout_width="match_parent"
@@ -159,7 +159,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="帯域集約モード"
+                    android:text="低遅延モード"
                     android:textColor="@color/on_surface"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -168,7 +168,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="公式WLBスケジューラで複数経路へ配分します。回線品質差が小さい環境向けです。"
+                    android:text="公式MIN_RTTで遅延が最も小さい経路を優先します。応答性を重視する通信向けです。"
                     android:textColor="@color/on_surface_variant"
                     android:textSize="12sp" />
 

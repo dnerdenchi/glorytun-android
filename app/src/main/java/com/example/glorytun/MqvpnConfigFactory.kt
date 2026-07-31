@@ -12,7 +12,7 @@ object MqvpnConfigFactory {
     const val EXTRA_SCHEDULER = "SCHEDULER"
 
     const val DEFAULT_PORT = "443"
-    const val DEFAULT_SCHEDULER = "MIN_RTT"
+    const val DEFAULT_SCHEDULER = "WLB"
     const val DEFAULT_ALLOW_INSECURE = true
     const val DEFAULT_KILL_SWITCH = true
 
@@ -57,12 +57,10 @@ object MqvpnConfigFactory {
                 GlorytunConstants.DEFAULT_DNS_PRIMARY,
                 GlorytunConstants.DEFAULT_DNS_SECONDARY
             ),
-            // Match the official Android app defaults. Both features require
-            // explicit server-side support and are intentionally opt-in.
-            reorderEnabled = false,
+            reorderEnabled = true,
             reorderProfile = MqvpnConfig.ReorderProfile.CELLULAR_BOND,
             reorderPorts = listOf(443),
-            hybridEnabled = false,
+            hybridEnabled = true,
             hybridTcpMode = MqvpnConfig.HybridTcpMode.AUTO,
         )
     }
@@ -73,7 +71,7 @@ object MqvpnConfigFactory {
             Context.MODE_PRIVATE
         ).getString(
             MqvpnRoutingMode.KEY_MODE,
-            MqvpnRoutingMode.BALANCED
+            MqvpnRoutingMode.WLB
         )
 
         return MqvpnRoutingMode.scheduler(mode).name
@@ -85,7 +83,7 @@ object MqvpnConfigFactory {
             "WLB" -> MqvpnConfig.Scheduler.WLB
             "WLB_UDP_PIN" -> MqvpnConfig.Scheduler.WLB_UDP_PIN
             "BACKUP_FEC" -> MqvpnConfig.Scheduler.BACKUP_FEC
-            else -> MqvpnConfig.Scheduler.MIN_RTT
+            else -> MqvpnConfig.Scheduler.WLB
         }
     }
 }

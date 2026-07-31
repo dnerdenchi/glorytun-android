@@ -7,6 +7,7 @@ import java.io.OutputStream
 import java.net.Inet4Address
 import java.util.LinkedList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -36,12 +37,23 @@ class ProxyTcpTunnelConnection(
         var retries: Int = 0
     )
 
+    private data class OutboundPacket(
+        val bytes: ByteArray,
+        val coalescibleAck: Boolean = false,
+    )
+
     private val lock = Object()
+    private val outboundEnqueueLock = Any()
     private val active = AtomicBoolean(true)
     private val establishedLatch = CountDownLatch(1)
     private val closedLatch = CountDownLatch(1)
     private val ipId = AtomicInteger((System.nanoTime() and 0xffff).toInt())
     private val pendingSegments = LinkedList<PendingSegment>()
+    private val outboundPackets = LinkedBlockingDeque<OutboundPacket>()
+    private val packetSenderThread = Thread(
+        { packetSenderLoop() },
+        "proxy-tcp-packet-sender-${key.localPort}"
+    )
     private val retransmitThread = Thread({ retransmitLoop() }, "proxy-tcp-retransmit-${key.localPort}")
 
     private val maxSegmentSize = min(DEFAULT_MSS, max(256, mtu - IPV4_TCP_HEADER_BYTES))
@@ -59,6 +71,8 @@ class ProxyTcpTunnelConnection(
     private var remoteClosed = false
 
     fun start(timeoutMs: Long = CONNECT_TIMEOUT_MS): Boolean {
+        packetSenderThread.isDaemon = true
+        packetSenderThread.start()
         retransmitThread.isDaemon = true
         retransmitThread.start()
         synchronized(lock) {
@@ -224,7 +238,23 @@ class ProxyTcpTunnelConnection(
             pendingByteCount += sequenceLength
         }
         sendNext = segmentEnd
-        packetSender(packet)
+        enqueueOutbound(
+            packet = packet,
+            coalescibleAck = flags == TcpFlags.ACK && payload.isEmpty(),
+        )
+    }
+
+    private fun enqueueOutbound(packet: ByteArray, coalescibleAck: Boolean = false) {
+        synchronized(outboundEnqueueLock) {
+            if (!active.get()) return
+            if (coalescibleAck) {
+                val previous = outboundPackets.peekLast()
+                if (previous?.coalescibleAck == true) {
+                    outboundPackets.removeLastOccurrence(previous)
+                }
+            }
+            outboundPackets.offerLast(OutboundPacket(packet, coalescibleAck))
+        }
     }
 
     private fun removeAcknowledgedSegments(acknowledgement: Long) {
@@ -292,7 +322,24 @@ class ProxyTcpTunnelConnection(
                 }
             }
 
-            resend.forEach { packetSender(it.packet) }
+            resend.forEach { segment -> enqueueOutbound(segment.packet) }
+        }
+    }
+
+    private fun packetSenderLoop() {
+        while (active.get()) {
+            val outbound = try {
+                outboundPackets.pollFirst(PACKET_SEND_POLL_MS, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                return
+            } ?: continue
+
+            if (!active.get()) return
+            runCatching { packetSender(outbound.bytes) }
+                .onFailure {
+                    Log.w(TAG, "TCP tunnel ${key.localPort} packet send failed: ${it.message}")
+                    close()
+                }
         }
     }
 
@@ -306,6 +353,11 @@ class ProxyTcpTunnelConnection(
         if (!active.getAndSet(false)) return
         pendingSegments.clear()
         pendingByteCount = 0L
+        synchronized(outboundEnqueueLock) {
+            outboundPackets.clear()
+        }
+        packetSenderThread.interrupt()
+        retransmitThread.interrupt()
         establishedLatch.countDown()
         closedLatch.countDown()
         lock.notifyAll()
@@ -330,5 +382,6 @@ class ProxyTcpTunnelConnection(
         private const val RETRANSMIT_INTERVAL_MS = 500L
         private const val RETRANSMIT_AFTER_MS = 1_000L
         private const val MAX_RETRIES = 12
+        private const val PACKET_SEND_POLL_MS = 100L
     }
 }

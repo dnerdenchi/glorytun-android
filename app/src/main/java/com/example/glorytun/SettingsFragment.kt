@@ -150,8 +150,8 @@ class SettingsFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences(
             MqvpnRoutingMode.PREFS_NAME, Context.MODE_PRIVATE
         )
-        val mode = prefs.getString(MqvpnRoutingMode.KEY_MODE, MqvpnRoutingMode.BALANCED)
-        val label = "${MqvpnRoutingMode.displayName(mode)}送信モード"
+        val mode = prefs.getString(MqvpnRoutingMode.KEY_MODE, MqvpnRoutingMode.WLB)
+        val label = MqvpnRoutingMode.displayName(mode)
         view.findViewById<android.widget.TextView>(R.id.tv_network_mode_subtitle)?.text = label
     }
 }

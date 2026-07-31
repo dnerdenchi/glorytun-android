@@ -2,24 +2,23 @@ package com.example.glorytun
 
 import com.mqvpn.sdk.core.model.MqvpnConfig
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MqvpnConfigFactoryTest {
     @Test
-    fun defaultConfigMatchesTheSmoothOfficialAndroidPath() {
+    fun defaultConfigEnablesWlbHybridAndReorder() {
         val config = MqvpnConfigFactory.create(
             serverAddress = "203.0.113.10",
             serverPort = "443",
             authKey = "test-key"
         )
 
-        assertEquals(MqvpnConfig.Scheduler.MIN_RTT, config.scheduler)
-        assertFalse(config.reorderEnabled)
+        assertEquals(MqvpnConfig.Scheduler.WLB, config.scheduler)
+        assertTrue(config.reorderEnabled)
         assertEquals(MqvpnConfig.ReorderProfile.CELLULAR_BOND, config.reorderProfile)
         assertEquals(listOf(443), config.reorderPorts)
-        assertFalse(config.hybridEnabled)
+        assertTrue(config.hybridEnabled)
         assertEquals(MqvpnConfig.HybridTcpMode.AUTO, config.hybridTcpMode)
     }
 
@@ -43,7 +42,7 @@ class MqvpnConfigFactoryTest {
             killSwitch = false
         )
 
-        assertFalse(config.killSwitch)
+        org.junit.Assert.assertFalse(config.killSwitch)
     }
 
     @Test
@@ -59,7 +58,7 @@ class MqvpnConfigFactoryTest {
     }
 
     @Test
-    fun unknownSchedulerFallsBackToOfficialMinRtt() {
+    fun unknownSchedulerFallsBackToRecommendedWlb() {
         val config = MqvpnConfigFactory.create(
             serverAddress = "203.0.113.10",
             serverPort = "443",
@@ -67,6 +66,6 @@ class MqvpnConfigFactoryTest {
             schedulerName = "unknown",
         )
 
-        assertEquals(MqvpnConfig.Scheduler.MIN_RTT, config.scheduler)
+        assertEquals(MqvpnConfig.Scheduler.WLB, config.scheduler)
     }
 }

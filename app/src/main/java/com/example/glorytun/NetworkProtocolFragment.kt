@@ -22,9 +22,9 @@ class NetworkProtocolFragment : Fragment() {
         const val KEY_MODE = MqvpnRoutingMode.KEY_MODE
         const val KEY_THRESHOLD_KBPS = "speed_threshold_kbps"
 
-        const val MODE_BONDING = MqvpnRoutingMode.BALANCED
-        const val MODE_WIFI_FIRST = MqvpnRoutingMode.UDP_SPEED
-        const val MODE_SIM_FIRST = MqvpnRoutingMode.LOW_LATENCY
+        const val MODE_BONDING = MqvpnRoutingMode.WLB
+        const val MODE_WIFI_FIRST = MqvpnRoutingMode.MIN_RTT
+        const val MODE_SIM_FIRST = MqvpnRoutingMode.WLB_UDP_PIN
 
         const val DEFAULT_THRESHOLD_KBPS = 5000 // 5 Mbps
     }
@@ -232,12 +232,7 @@ class NetworkProtocolFragment : Fragment() {
             .putInt(KEY_THRESHOLD_KBPS, thresholdKbps)
             .apply()
 
-        val modeName = when (selectedMode) {
-            MODE_BONDING -> "公式・自動"
-            MODE_WIFI_FIRST -> "帯域集約"
-            MODE_SIM_FIRST -> "UDP安定"
-            else -> selectedMode
-        }
+        val modeName = MqvpnRoutingMode.displayName(selectedMode)
         Toast.makeText(requireContext(), "保存しました: $modeName", Toast.LENGTH_SHORT).show()
         parentFragmentManager.popBackStack()
     }
