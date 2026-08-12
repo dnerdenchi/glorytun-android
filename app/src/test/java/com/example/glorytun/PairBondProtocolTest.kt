@@ -3,6 +3,7 @@ package com.example.glorytun
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -70,6 +71,32 @@ class PairBondProtocolTest {
             assertEquals("active", scheduler.select(listOf(active, backup))?.id)
         }
         assertEquals("backup", scheduler.select(listOf(active.copy(ready = false), backup))?.id)
+    }
+
+    @Test
+    fun wifiLocalSimAndPairedSimAllParticipateInActiveScheduling() {
+        val scheduler = PairBondPathScheduler()
+        val paths = listOf(
+            PairBondLocalPath.WIFI_ID,
+            PairBondLocalPath.CELLULAR_ID,
+            "paired-sim-a",
+        ).map { id ->
+            PairBondPathSnapshot(
+                id = id,
+                priority = PairBondPathPriority.ACTIVE,
+                ready = true,
+                rttMillis = 50,
+                lossPermille = 0,
+                deliveryRateBps = 5_000_000,
+                inFlightBytes = 0,
+            )
+        }
+
+        val selected = buildSet {
+            repeat(12) { scheduler.select(paths)?.id?.let(::add) }
+        }
+
+        assertTrue(selected.containsAll(paths.map { it.id }))
     }
 
     @Test

@@ -29,9 +29,11 @@ class PairShareFragment : Fragment() {
     private lateinit var pendingTitle: TextView
     private lateinit var discoveredTitle: TextView
     private lateinit var peersTitle: TextView
+    private lateinit var localPathsTitle: TextView
     private lateinit var pendingContainer: LinearLayout
     private lateinit var discoveredContainer: LinearLayout
     private lateinit var peersContainer: LinearLayout
+    private lateinit var localPathsContainer: LinearLayout
 
     private var rendering = false
 
@@ -54,9 +56,11 @@ class PairShareFragment : Fragment() {
         pendingTitle = view.findViewById(R.id.tv_pair_share_pending_title)
         discoveredTitle = view.findViewById(R.id.tv_pair_share_discovered_title)
         peersTitle = view.findViewById(R.id.tv_pair_share_peers_title)
+        localPathsTitle = view.findViewById(R.id.tv_pair_share_local_paths_title)
         pendingContainer = view.findViewById(R.id.pair_share_pending_container)
         discoveredContainer = view.findViewById(R.id.pair_share_discovered_container)
         peersContainer = view.findViewById(R.id.pair_share_peers_container)
+        localPathsContainer = view.findViewById(R.id.pair_share_local_paths_container)
 
         switchEnabled.setOnCheckedChangeListener { _, enabled ->
             if (rendering) return@setOnCheckedChangeListener
@@ -119,11 +123,34 @@ class PairShareFragment : Fragment() {
             pendingTitle.visibility = if (state.enabled) View.VISIBLE else View.GONE
             discoveredTitle.visibility = if (state.enabled) View.VISIBLE else View.GONE
             peersTitle.visibility = if (state.enabled) View.VISIBLE else View.GONE
+            localPathsTitle.visibility = if (state.enabled) View.VISIBLE else View.GONE
+            localPathsContainer.visibility = if (state.enabled) View.VISIBLE else View.GONE
             renderPending(state.pending)
             renderDiscoveries(state.discovered)
+            renderLocalPaths(state.peerStats)
             renderPeers(state.peers, state.peerStats)
         } finally {
             rendering = false
+        }
+    }
+
+    private fun renderLocalPaths(statsByPath: Map<String, PairSharePeerStats>) {
+        localPathsContainer.removeAllViews()
+        listOf(
+            PairBondLocalPath.WIFI_ID to PairBondLocalPath.WIFI_NAME,
+            PairBondLocalPath.CELLULAR_ID to PairBondLocalPath.CELLULAR_NAME,
+        ).forEach { (pathId, displayName) ->
+            val card = card()
+            card.addView(title(displayName))
+            card.addView(subtitle("パス設定: 自動ボンディング（常時使用）"))
+            val stats = statsByPath[pathId]
+            card.addView(
+                subtitle(
+                    stats?.let(::formatPeerStats)
+                        ?: "Pair & ShareのVPN接続中にリレーへ直接接続します",
+                ),
+            )
+            localPathsContainer.addView(card)
         }
     }
 

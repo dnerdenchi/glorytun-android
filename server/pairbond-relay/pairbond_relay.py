@@ -3,9 +3,9 @@
 BondVPN PairBond relay.
 
 This process is intentionally separate from mqvpn. It accepts TCP on the same
-numeric port (normally 443; mqvpn uses UDP), joins authenticated paired-SIM
-paths into one logical session, reassembles TCP ranges, and forwards SOCKS
-TCP/UDP traffic to public internet destinations.
+numeric port (normally 443; mqvpn uses UDP), joins authenticated local and
+paired-SIM paths into one logical session, reassembles TCP ranges, and forwards
+SOCKS TCP/UDP traffic to public internet destinations.
 """
 
 from __future__ import annotations
@@ -39,6 +39,10 @@ MAX_PATH_ID_BYTES = 256
 MAX_HOST_BYTES = 253
 MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_RECORD_BYTES = MAX_PAYLOAD_BYTES + 17 + 16
+MAX_REASSEMBLY_BYTES = 4 * 1024 * 1024
+# Keep the send window below the Android reassembly limit so a delayed path
+# cannot fill the receiver with data that follows one missing chunk.
+MAX_TCP_OUTBOUND_BYTES = 2 * 1024 * 1024
 
 OPEN_TCP = 1
 OPEN_TCP_OK = 2
@@ -255,7 +259,7 @@ async def resolve_public_host(host: str, port: int, socktype: int) -> str:
 
 
 class OrderedReassembler:
-    def __init__(self, maximum_buffered: int = 4 * 1024 * 1024) -> None:
+    def __init__(self, maximum_buffered: int = MAX_REASSEMBLY_BYTES) -> None:
         self.next_offset = 0
         self.maximum_buffered = maximum_buffered
         self.pending: dict[int, bytes] = {}
@@ -350,6 +354,7 @@ class TcpFlow:
         self.outbound_offset = 0
         self.outbound: OrderedDict[int, PendingChunk] = OrderedDict()
         self.outbound_lock = asyncio.Lock()
+        self.outbound_changed = asyncio.Condition(self.outbound_lock)
         self.closed = False
         self.reader_task = asyncio.create_task(self._read_remote(), name="pairbond-tcp-reader")
 
@@ -363,12 +368,16 @@ class TcpFlow:
             return self.inbound.next_offset
 
     async def acknowledge(self, next_offset: int) -> None:
-        async with self.outbound_lock:
+        async with self.outbound_changed:
+            removed = False
             while self.outbound:
                 offset, chunk = next(iter(self.outbound.items()))
                 if offset + len(chunk.data) > next_offset:
                     break
                 self.outbound.popitem(last=False)
+                removed = True
+            if removed:
+                self.outbound_changed.notify_all()
 
     async def retry_due(self, delay: float) -> list[PendingChunk]:
         now = time.monotonic()
@@ -386,10 +395,9 @@ class TcpFlow:
                 data = await self.reader.read(16 * 1024)
                 if not data:
                     break
-                async with self.outbound_lock:
-                    outstanding = sum(len(chunk.data) for chunk in self.outbound.values())
-                    if outstanding + len(data) > 8 * 1024 * 1024:
-                        raise ProtocolError("downlink retransmission buffer limit exceeded")
+                async with self.outbound_changed:
+                    while sum(len(chunk.data) for chunk in self.outbound.values()) + len(data) > MAX_TCP_OUTBOUND_BYTES:
+                        await self.outbound_changed.wait()
                     chunk = PendingChunk(self.outbound_offset, data)
                     self.outbound[self.outbound_offset] = chunk
                     self.outbound_offset += len(data)

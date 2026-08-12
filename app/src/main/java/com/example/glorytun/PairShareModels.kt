@@ -374,9 +374,6 @@ object PairShareCoordinator {
         if (!repository.isReceivingEnabled()) {
             throw IllegalStateException("受信を有効にしてください")
         }
-        if (!repository.hasReceivingPeers()) {
-            throw IllegalStateException("受信に使用するペア端末を1台以上追加してください")
-        }
         val existing = bondSession
             ?: throw IllegalStateException("PairBond リレーの接続設定がありません")
         existing.refreshPaths()

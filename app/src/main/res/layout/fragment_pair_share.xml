@@ -24,7 +24,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="同じ Wi-Fi 上の複数の BondVPN 端末をペアリングし、SIM回線を同時利用する暗号化プロキシ経路を作ります。"
+            android:text="この端末のWi-FiとSIMに、同じWi-Fi上のペア端末のSIMを追加し、すべてを同時利用する暗号化ボンディング経路を作ります。"
             android:textColor="@color/on_surface_variant"
             android:textSize="13sp" />
 
@@ -177,10 +177,27 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:text="各ペア端末を「自動ボンディング」または「バックアップ専用」に設定してください。ダッシュボードのプロキシ接続で複数SIMを同時に使います。"
+                android:text="この端末のWi-Fi・SIMは自動で使用されます。各ペア端末は「自動ボンディング」または「バックアップ専用」に設定してください。"
                 android:textColor="@color/on_surface_variant"
                 android:textSize="12sp" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_pair_share_local_paths_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="この端末のボンディング経路"
+            android:textColor="@color/on_surface"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/pair_share_local_paths_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
 
         <TextView
             android:id="@+id/tv_pair_share_pending_title"

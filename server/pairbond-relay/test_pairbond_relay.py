@@ -87,6 +87,62 @@ class PairBondRelayTest(unittest.IsolatedAsyncioTestCase):
         writer.close()
         await writer.wait_closed()
 
+    async def test_slow_client_applies_backpressure_without_closing_large_download(self) -> None:
+        chunk = b"x" * (16 * 1024)
+        window_chunks = relay.MAX_TCP_OUTBOUND_BYTES // len(chunk)
+        total_chunks = window_chunks + 8
+
+        class FastReader:
+            def __init__(self) -> None:
+                self.remaining = total_chunks
+
+            async def read(self, _size: int) -> bytes:
+                if self.remaining == 0:
+                    return b""
+                self.remaining -= 1
+                return chunk
+
+        class NullWriter:
+            def write(self, _data: bytes) -> None:
+                pass
+
+            async def drain(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+            async def wait_closed(self) -> None:
+                pass
+
+        class SlowSession:
+            def __init__(self) -> None:
+                self.sent: list[relay.PendingChunk] = []
+                self.closed = asyncio.Event()
+
+            async def send_downstream(self, _flow: relay.TcpFlow, pending: relay.PendingChunk, duplicate: bool) -> None:
+                self.sent.append(pending)
+
+            async def close_tcp(self, _flow_id: int, notify_client: bool) -> None:
+                self.closed.set()
+
+        session = SlowSession()
+        flow = relay.TcpFlow(session, 7, ("example.com", 443), FastReader(), NullWriter())
+        try:
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while len(session.sent) < window_chunks and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
+
+            self.assertLess(relay.MAX_TCP_OUTBOUND_BYTES, relay.MAX_REASSEMBLY_BYTES)
+            self.assertEqual(len(session.sent), window_chunks)
+            self.assertFalse(session.closed.is_set())
+
+            await flow.acknowledge(16 * len(chunk))
+            await asyncio.wait_for(session.closed.wait(), timeout=2)
+            self.assertEqual(len(session.sent), total_chunks)
+        finally:
+            await flow.close()
+
     async def test_invalid_handshake_is_rejected(self) -> None:
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
         writer.write(

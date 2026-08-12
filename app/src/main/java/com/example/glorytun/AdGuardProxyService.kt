@@ -129,8 +129,8 @@ class AdGuardProxyService : MqvpnVpnService() {
 
         if (intent.getBooleanExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, false)) {
             val pairRepository = PairShareRepository(this)
-            if (!pairRepository.isReceivingEnabled() || !pairRepository.hasReceivingPeers()) {
-                Log.w(TAG, "PairBond receive was requested without a selected paired device")
+            if (!pairRepository.isReceivingEnabled()) {
+                Log.w(TAG, "PairBond receive was requested while receiving is disabled")
                 isRunning.set(false)
                 sendState(ConnectionStates.DISCONNECTED)
                 stopSelf(startId)

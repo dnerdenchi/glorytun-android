@@ -237,7 +237,7 @@ class DashboardFragment : Fragment() {
             return
         }
 
-        if (pairShareRepository.isReceivingEnabled() && pairShareRepository.hasReceivingPeers()) {
+        if (pairShareRepository.isReceivingEnabled()) {
             ConnectionController.startPairShareProxy(requireContext(), ip, port, secret)
             viewModel.connectionState.value = ConnectionStates.PROXY_CONNECTING
             return

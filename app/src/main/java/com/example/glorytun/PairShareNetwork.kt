@@ -5,6 +5,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.SystemClock
+import java.io.Closeable
+import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -49,10 +52,21 @@ object PairShareNetwork {
     fun openCellularSocket(context: Context, host: String, port: Int): Socket {
         require(port in 1..65535)
         val network = activeCellular(context)
-            ?: throw java.io.IOException("利用可能なモバイル回線がありません")
-        val address = InetAddress.getAllByName(host)
+            ?: throw IOException("利用可能なモバイル回線がありません")
+        return openNetworkSocket(network, host, port)
+    }
+
+    fun openWifiSocket(context: Context, host: String, port: Int): Socket {
+        require(port in 1..65535)
+        val network = activeWifi(context)
+            ?: throw IOException("利用可能なWi-Fi回線がありません")
+        return openNetworkSocket(network, host, port)
+    }
+
+    private fun openNetworkSocket(network: Network, host: String, port: Int): Socket {
+        val address = network.getAllByName(host)
             .firstOrNull(::isPublicInternetAddress)
-            ?: throw java.io.IOException("PairBond サーバーはパブリックアドレスである必要があります")
+            ?: throw IOException("PairBond サーバーはパブリックアドレスである必要があります")
         val socket = network.socketFactory.createSocket()
         try {
             socket.tcpNoDelay = true
@@ -78,6 +92,54 @@ object PairShareNetwork {
         .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
         .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
         .build()
+
+    /** Keeps this device's SIM available while Wi-Fi is the Android default route. */
+    class CellularLease(context: Context) : Closeable {
+        private val manager = context.applicationContext.getSystemService(ConnectivityManager::class.java)
+
+        @Volatile
+        private var network: Network? = activeCellular(context)
+
+        private val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(available: Network) {
+                network = available
+            }
+
+            override fun onLost(lost: Network) {
+                if (network == lost) network = null
+            }
+        }
+
+        init {
+            manager.requestNetwork(
+                NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build(),
+                callback,
+            )
+        }
+
+        fun openSocket(host: String, port: Int): Socket {
+            val deadline = SystemClock.elapsedRealtime() + CELLULAR_CONNECT_TIMEOUT_MILLIS
+            var selected = network
+            while (selected == null && SystemClock.elapsedRealtime() < deadline) {
+                Thread.sleep(NETWORK_POLL_MILLIS)
+                selected = network
+            }
+            return openNetworkSocket(
+                selected ?: throw IOException("自端末のSIM回線を開始できません"),
+                host,
+                port,
+            )
+        }
+
+        override fun close() {
+            runCatching { manager.unregisterNetworkCallback(callback) }
+            network = null
+        }
+    }
 
     /** Prevent a paired device from using this feature as an internal-network pivot. */
     fun isPublicInternetAddress(address: InetAddress): Boolean {
@@ -108,4 +170,5 @@ object PairShareNetwork {
     }
 
     private const val CELLULAR_CONNECT_TIMEOUT_MILLIS = 15_000
+    private const val NETWORK_POLL_MILLIS = 50L
 }

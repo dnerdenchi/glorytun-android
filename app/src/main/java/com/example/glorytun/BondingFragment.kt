@@ -260,7 +260,7 @@ class BondingFragment : Fragment() {
         }
 
         val pairRepository = PairShareRepository(requireContext())
-        if (pairRepository.isReceivingEnabled() && pairRepository.hasReceivingPeers()) {
+        if (pairRepository.isReceivingEnabled()) {
             ConnectionController.startPairShareProxy(
                 requireContext(),
                 profile.ip,

@@ -14,6 +14,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.CountDownLatch
@@ -27,6 +28,13 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 
 private const val PAIR_BOND_TAG = "PairBondSession"
+
+object PairBondLocalPath {
+    const val WIFI_ID = "local:wifi"
+    const val CELLULAR_ID = "local:cellular"
+    const val WIFI_NAME = "この端末のWi-Fi"
+    const val CELLULAR_NAME = "この端末のSIM"
+}
 
 data class PairBondConfig(
     val serverHost: String,
@@ -70,10 +78,10 @@ interface PairShareUdpTunnel : Closeable {
 }
 
 /**
- * One logical client session over zero or more paired SIM paths.  Every
- * PairBond path is an encrypted TCP connection from a peer's cellular network
- * to the same relay session.  Byte ranges are scheduled independently and are
- * reassembled at the relay and at this device.
+ * One logical client session over this device's Wi-Fi/SIM and zero or more
+ * paired SIM paths. Every path is an encrypted TCP connection to the same
+ * relay session. Byte ranges are scheduled independently and are reassembled
+ * at the relay and at this device.
  */
 class PairBondSession(
     context: Context,
@@ -90,6 +98,9 @@ class PairBondSession(
     private val scheduler = PairBondPathScheduler()
     private val ioExecutor: ExecutorService = Executors.newCachedThreadPool()
     private val maintenanceExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private val cellularLease = runCatching { PairShareNetwork.CellularLease(appContext) }
+        .onFailure { Log.w(PAIR_BOND_TAG, "Could not request the local cellular network", it) }
+        .getOrNull()
 
     @Volatile
     private var lastRepositoryRefresh = 0L
@@ -113,7 +124,18 @@ class PairBondSession(
         if (closed.get()) return
         val now = SystemClock.elapsedRealtime()
         val byId = repository.peers().associateBy { it.id }
+        ensureLocalPath(
+            id = PairBondLocalPath.WIFI_ID,
+            displayName = PairBondLocalPath.WIFI_NAME,
+            kind = PairBondPathKind.LOCAL_WIFI,
+        )
+        ensureLocalPath(
+            id = PairBondLocalPath.CELLULAR_ID,
+            displayName = PairBondLocalPath.CELLULAR_NAME,
+            kind = PairBondPathKind.LOCAL_CELLULAR,
+        )
         paths.entries.toList().forEach { (id, managed) ->
+            if (managed.kind != PairBondPathKind.PAIRED_CELLULAR) return@forEach
             val peer = byId[id]
             val priority = peer?.let(repository::pathPriority) ?: PairBondPathPriority.DISABLED
             if (peer == null || priority == PairBondPathPriority.DISABLED) {
@@ -127,7 +149,15 @@ class PairBondSession(
             val priority = repository.pathPriority(peer)
             if (priority == PairBondPathPriority.DISABLED) return@forEach
             if (peer.address.isNullOrBlank() || peer.port !in 1..65535) return@forEach
-            val managed = paths.getOrPut(peer.id) { ManagedPath(peer, priority) }
+            val managed = paths.getOrPut(peer.id) {
+                ManagedPath(
+                    id = peer.id,
+                    displayName = peer.displayName,
+                    kind = PairBondPathKind.PAIRED_CELLULAR,
+                    initialPeer = peer,
+                    initialPriority = priority,
+                )
+            }
             managed.peer = peer
             managed.priority = priority
             if (shouldStartPairBondConnection(
@@ -143,6 +173,18 @@ class PairBondSession(
         }
         lastRepositoryRefresh = SystemClock.elapsedRealtime()
         publishStats()
+    }
+
+    private fun ensureLocalPath(id: String, displayName: String, kind: PairBondPathKind) {
+        paths.getOrPut(id) {
+            ManagedPath(
+                id = id,
+                displayName = displayName,
+                kind = kind,
+                initialPeer = null,
+                initialPriority = PairBondPathPriority.ACTIVE,
+            )
+        }.priority = PairBondPathPriority.ACTIVE
     }
 
     fun openTcp(host: String, port: Int): PairBondTcpStream {
@@ -249,7 +291,7 @@ class PairBondSession(
         }
         selected.forEach { path ->
             if (send(path, PairBondFrame(PairBondFrameType.TCP_DATA, stream.id, chunk.offset, chunk.payload))) {
-                chunk.recordAttempt(path.peer.id)
+                chunk.recordAttempt(path.id)
             }
         }
     }
@@ -280,12 +322,12 @@ class PairBondSession(
         ioExecutor.execute {
             try {
                 val clientPath = PairBondClientPath(
-                    context = appContext,
-                    peer = managed.peer,
+                    pathId = managed.id,
                     config = config,
                     sessionId = sessionId,
                     initialPriority = managed.priority,
                     stats = managed.stats,
+                    connectionFactory = { openPathConnection(managed) },
                     onFrame = { path, frame -> onFrame(managed, path, frame) },
                     onClosed = { path, error -> onPathClosed(managed, path, error) },
                 )
@@ -297,17 +339,33 @@ class PairBondSession(
                     managed.transport = clientPath
                     managed.lastPongMillis = SystemClock.elapsedRealtime()
                     managed.stats.markReady()
+                    Log.i(PAIR_BOND_TAG, "PairBond path ready: " + managed.displayName + " (" + managed.id + ")")
                     sendPathQuality(managed)
                     recoverFlows()
                 }
             } catch (error: Throwable) {
                 managed.stats.markOffline()
-                Log.i(PAIR_BOND_TAG, "PairBond path unavailable: " + managed.peer.displayName + ": " + error.message)
+                Log.i(PAIR_BOND_TAG, "PairBond path unavailable: " + managed.displayName + ": " + error.message)
             } finally {
                 managed.connecting.set(false)
                 publishStats()
             }
         }
+    }
+
+    private fun openPathConnection(managed: ManagedPath): PairBondPathConnection = when (managed.kind) {
+        PairBondPathKind.LOCAL_WIFI -> SocketPairBondPathConnection(
+            PairShareNetwork.openWifiSocket(appContext, config.serverHost, config.serverPort),
+        )
+        PairBondPathKind.LOCAL_CELLULAR -> SocketPairBondPathConnection(
+            cellularLease?.openSocket(config.serverHost, config.serverPort)
+                ?: throw IOException("自端末のSIM回線を要求できません"),
+        )
+        PairBondPathKind.PAIRED_CELLULAR -> PairShareBondPathConnection(
+            appContext,
+            managed.peer ?: throw IOException("ペア端末情報がありません"),
+            config,
+        )
     }
 
     private fun onPathClosed(
@@ -372,7 +430,7 @@ class PairBondSession(
             if (stream.isOpen()) {
                 val existingPathIds = stream.pendingPathIds()
                 val backup = selectPaths(redundant = false).firstOrNull()
-                if (backup != null && backup.peer.id !in existingPathIds) {
+                if (backup != null && backup.id !in existingPathIds) {
                     runCatching {
                         send(
                             backup,
@@ -472,6 +530,7 @@ class PairBondSession(
         maintenanceExecutor.shutdownNow()
         paths.values.forEach(ManagedPath::close)
         paths.clear()
+        cellularLease?.close()
         tcpFlows.values.forEach(PairBondTcpStream::closeFromSession)
         tcpFlows.clear()
         udpFlows.values.forEach(PairBondUdpStream::closeFromSession)
@@ -480,20 +539,23 @@ class PairBondSession(
     }
 
     private class ManagedPath(
-        initialPeer: PairSharePeer,
+        val id: String,
+        val displayName: String,
+        val kind: PairBondPathKind,
+        initialPeer: PairSharePeer?,
         initialPriority: PairBondPathPriority,
     ) : Closeable {
-        @Volatile var peer: PairSharePeer = initialPeer
+        @Volatile var peer: PairSharePeer? = initialPeer
         @Volatile var priority: PairBondPathPriority = initialPriority
         @Volatile var transport: PairBondClientPath? = null
         @Volatile var lastAttemptMillis: Long = 0L
         @Volatile var lastPongMillis: Long = 0L
         val connecting = AtomicBoolean(false)
-        val stats = PairBondPathStats(initialPeer.id)
+        val stats = PairBondPathStats(id)
 
         fun ready(): Boolean = priority != PairBondPathPriority.DISABLED && transport?.isAlive() == true
 
-        fun snapshot(): PairBondPathSnapshot = stats.schedulerSnapshot(peer.id, priority, ready())
+        fun snapshot(): PairBondPathSnapshot = stats.schedulerSnapshot(id, priority, ready())
 
         override fun close() {
             transport?.close()
@@ -741,48 +803,88 @@ class PairBondUdpStream internal constructor(
     }
 }
 
+private enum class PairBondPathKind {
+    LOCAL_WIFI,
+    LOCAL_CELLULAR,
+    PAIRED_CELLULAR,
+}
+
+private interface PairBondPathConnection : Closeable {
+    val input: InputStream
+    val output: OutputStream
+}
+
+private class SocketPairBondPathConnection(
+    private val socket: Socket,
+) : PairBondPathConnection {
+    override val input: InputStream = socket.getInputStream()
+    override val output: OutputStream = socket.getOutputStream()
+
+    override fun close() {
+        socket.close()
+    }
+}
+
+private class PairShareBondPathConnection(
+    context: Context,
+    peer: PairSharePeer,
+    config: PairBondConfig,
+) : PairBondPathConnection {
+    private val client = PairShareClient(context, peer)
+    private val stream = try {
+        client.openBondPath(config.serverHost, config.serverPort)
+    } catch (error: Throwable) {
+        client.close()
+        throw error
+    }
+
+    override val input: InputStream = stream.input()
+    override val output: OutputStream = object : OutputStream() {
+        override fun write(value: Int) {
+            stream.write(byteArrayOf(value.toByte()))
+        }
+
+        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+            stream.write(bytes, offset, length)
+        }
+    }
+
+    override fun close() {
+        runCatching { stream.close() }
+        client.close()
+    }
+}
+
 private class PairBondClientPath(
-    private val context: Context,
-    private val peer: PairSharePeer,
+    private val pathId: String,
     private val config: PairBondConfig,
     private val sessionId: ByteArray,
     private val initialPriority: PairBondPathPriority,
     val stats: PairBondPathStats,
+    private val connectionFactory: () -> PairBondPathConnection,
     private val onFrame: (PairBondClientPath, PairBondFrame) -> Unit,
     private val onClosed: (PairBondClientPath, Throwable?) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
 
-    @Volatile private var pairClient: PairShareClient? = null
-    @Volatile private var stream: PairShareTcpStream? = null
+    @Volatile private var connection: PairBondPathConnection? = null
     @Volatile private var codec: PairBondFrameCodec? = null
 
     fun connect() {
-        val client = PairShareClient(context, peer)
+        val openedConnection = connectionFactory()
         try {
-            val bondStream = client.openBondPath(config.serverHost, config.serverPort)
-            val input = DataInputStream(BufferedInputStream(bondStream.input(), IO_BUFFER_BYTES))
-            val rawOutput = object : OutputStream() {
-                override fun write(value: Int) {
-                    bondStream.write(byteArrayOf(value.toByte()))
-                }
-
-                override fun write(bytes: ByteArray, offset: Int, length: Int) {
-                    bondStream.write(bytes, offset, length)
-                }
-            }
-            val output = DataOutputStream(BufferedOutputStream(rawOutput, IO_BUFFER_BYTES))
+            val input = DataInputStream(BufferedInputStream(openedConnection.input, IO_BUFFER_BYTES))
+            val output = DataOutputStream(BufferedOutputStream(openedConnection.output, IO_BUFFER_BYTES))
             val clientNonce = PairShareCrypto.randomBytes(PairBondWire.NONCE_BYTES)
-            PairBondWire.writeClientHello(output, sessionId, peer.id, clientNonce, config.authKey)
+            PairBondWire.writeClientHello(output, sessionId, pathId, clientNonce, config.authKey)
             val hello = PairBondWire.readServerHello(
                 input,
                 sessionId,
-                peer.id,
+                pathId,
                 clientNonce,
                 config.authKey,
             )
-            pairClient = client
-            stream = bondStream
+            connection = openedConnection
             codec = PairBondFrameCodec(
                 input = input,
                 output = output,
@@ -799,12 +901,12 @@ private class PairBondClientPath(
                     ),
                 )
             }
-            Thread(::readLoop, "pair-bond-" + peer.id.take(8)).apply {
+            Thread(::readLoop, "pair-bond-" + pathId.takeLast(12)).apply {
                 isDaemon = true
                 start()
             }
         } catch (error: Throwable) {
-            runCatching { client.close() }
+            runCatching { openedConnection.close() }
             throw error
         }
     }
@@ -839,8 +941,7 @@ private class PairBondClientPath(
 
     private fun closeInternal(error: Throwable?) {
         if (!closed.compareAndSet(false, true)) return
-        runCatching { stream?.close() }
-        runCatching { pairClient?.close() }
+        runCatching { connection?.close() }
         onClosed(this, error)
     }
 
