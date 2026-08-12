@@ -29,6 +29,8 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     val wifiKBs = MutableLiveData(0f)
     val simKBs = MutableLiveData(0f)
+    val pairShareKBs = MutableLiveData(0f)
+    val pairSharePeerNames = MutableLiveData<List<String>>(emptyList())
     val wifiTotalBytes = MutableLiveData(0L)
     val simTotalBytes = MutableLiveData(0L)
 
@@ -48,6 +50,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     private val trafficRateCalculator = TrafficRateCalculator()
     private val wifiDisplayRate = TrafficRateDisplayHold()
     private val simDisplayRate = TrafficRateDisplayHold()
+    private val pairShareDisplayRate = TrafficRateDisplayHold()
 
     init {
         historicalPoints.addAll(trafficDataStore.load())
@@ -92,6 +95,8 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         simRx: Long,
         measuredWifiBps: Long? = null,
         measuredSimBps: Long? = null,
+        measuredPairShareBps: Long = 0L,
+        pairSharePeerNames: List<String> = emptyList(),
     ) {
         val nowMs = System.currentTimeMillis()
         val rates = trafficRateCalculator.update(
@@ -106,9 +111,12 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
         val sampledWifiKBs = selectTrafficRate(rates.wifiKBs, measuredWifiBps)
         val sampledSimKBs = selectTrafficRate(rates.simKBs, measuredSimBps)
+        val sampledPairShareKBs = measuredPairShareBps.coerceAtLeast(0L) / 8192f
 
         wifiKBs.value = wifiDisplayRate.update(sampledWifiKBs, nowMs)
         simKBs.value = simDisplayRate.update(sampledSimKBs, nowMs)
+        pairShareKBs.value = pairShareDisplayRate.update(sampledPairShareKBs, nowMs)
+        this.pairSharePeerNames.value = pairSharePeerNames
 
         if (sampledWifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = sampledWifiKBs
         if (sampledSimKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = sampledSimKBs
@@ -116,23 +124,19 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         trafficHistory.add(TrafficPoint(nowMs, sampledWifiKBs, sampledSimKBs))
         while (trafficHistory.size > MAX_TRAFFIC_HISTORY_POINTS) trafficHistory.removeAt(0)
 
-        addRealtimePoint(sampledWifiKBs, sampledSimKBs)
+        addRealtimePoint(sampledWifiKBs, sampledSimKBs, sampledPairShareKBs)
 
         wifiTotalBytes.value = rates.wifiTotalBytes
         simTotalBytes.value = rates.simTotalBytes
     }
 
-    fun addRealtimePoint(wifi: Float, sim: Float) {
+    fun addRealtimePoint(wifi: Float, sim: Float, pairShare: Float = 0f) {
         if (realtimeWifiRates.size >= MAX_REALTIME_POINTS) realtimeWifiRates.removeFirst()
         if (realtimeSimRates.size >= MAX_REALTIME_POINTS) realtimeSimRates.removeFirst()
         realtimeWifiRates.addLast(wifi.coerceAtLeast(0f))
         realtimeSimRates.addLast(sim.coerceAtLeast(0f))
-        realtimeUpdated.value = System.currentTimeMillis()
-    }
-
-    fun addPairShareRealtimePoint(bytesPerSecond: Long) {
         if (realtimePairShareRates.size >= MAX_REALTIME_POINTS) realtimePairShareRates.removeFirst()
-        realtimePairShareRates.addLast(bytesPerSecond.coerceAtLeast(0L) / 1024f)
+        realtimePairShareRates.addLast(pairShare.coerceAtLeast(0f))
         realtimeUpdated.value = System.currentTimeMillis()
     }
 
@@ -147,8 +151,11 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         trafficRateCalculator.reset()
         wifiDisplayRate.reset()
         simDisplayRate.reset()
+        pairShareDisplayRate.reset()
         wifiKBs.value = 0f
         simKBs.value = 0f
+        pairShareKBs.value = 0f
+        pairSharePeerNames.value = emptyList()
         wifiTotalBytes.value = 0L
         simTotalBytes.value = 0L
         if (clearSessionHistory) {

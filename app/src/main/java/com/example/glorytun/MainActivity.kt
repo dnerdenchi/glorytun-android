@@ -91,6 +91,9 @@ class MainActivity : AppCompatActivity() {
                     .takeIf { it >= 0L },
                 measuredSimBps = intent.getLongExtra("sim_bps", -1L)
                     .takeIf { it >= 0L },
+                measuredPairShareBps = intent.getLongExtra("pair_share_bps", 0L),
+                pairSharePeerNames = intent.getStringArrayListExtra("pair_share_peer_names")
+                    ?: emptyList(),
             )
             val dailyWifi = intent.getDoubleExtra("daily_wifi_kb", -1.0)
             if (dailyWifi >= 0.0) {

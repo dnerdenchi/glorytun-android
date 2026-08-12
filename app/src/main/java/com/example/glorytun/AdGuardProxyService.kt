@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -54,8 +55,10 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val pairShareConnections = ConcurrentHashMap.newKeySet<PairShareTcpProxyConnection>()
     private val pairShareUdpAssociations = ConcurrentHashMap.newKeySet<PairShareUdpAssociation>()
     private val pathTrafficAccumulator = PathTrafficAccumulator()
+    private val pairBondTrafficAccumulator = PairBondDashboardTrafficAccumulator()
     private val bandwidthHistory = BandwidthHistory(maxSamples = 1)
     private lateinit var bandwidthEnforcer: BandwidthEnforcer
+    private lateinit var pairShareRepository: PairShareRepository
 
     @Volatile private var serverSocket: ServerSocket? = null
     @Volatile private var localAddress: Inet4Address? = null
@@ -72,20 +75,28 @@ class AdGuardProxyService : MqvpnVpnService() {
     private val statsRunnable = object : Runnable {
         override fun run() {
             if (!isRunning.get()) return
-            val trafficUpdate = pathTrafficAccumulator.update(latestPaths)
-            val bandwidthSample = bandwidthHistory
-                .onTick(latestPaths, System.nanoTime())
-                .lastOrNull()
-            val wifiBps = bandwidthSample?.perPathBps
-                ?.filterKeys { !isCellularInterface(it) }
-                ?.values
-                ?.sum()
-                ?: 0L
-            val simBps = bandwidthSample?.perPathBps
-                ?.filterKeys(::isCellularInterface)
-                ?.values
-                ?.sum()
-                ?: 0L
+            val pairUpdate = if (pairShareMode) {
+                pairBondTrafficAccumulator.update(
+                    stats = PairShareCoordinator.currentPeerStats(),
+                    peerNames = pairShareRepository.peers()
+                        .associate { it.id to it.displayName },
+                    nowMillis = SystemClock.elapsedRealtime(),
+                )
+            } else {
+                null
+            }
+            val trafficUpdate = pairUpdate?.let {
+                PathTrafficUpdate(it.totals, it.wifiDeltaKB, it.simDeltaKB)
+            } ?: pathTrafficAccumulator.update(latestPaths)
+            val bandwidthSample = if (pairUpdate == null) {
+                bandwidthHistory.onTick(latestPaths, System.nanoTime()).lastOrNull()
+            } else {
+                null
+            }
+            val wifiBps = pairUpdate?.wifiBps ?: bandwidthSample?.perPathBps
+                ?.filterKeys { !isCellularInterface(it) }?.values?.sum() ?: 0L
+            val simBps = pairUpdate?.simBps ?: bandwidthSample?.perPathBps
+                ?.filterKeys(::isCellularInterface)?.values?.sum() ?: 0L
             val bandwidthStatus = bandwidthEnforcer.onTick(
                 latestPaths,
                 trafficUpdate.wifiDeltaKB,
@@ -95,7 +106,13 @@ class AdGuardProxyService : MqvpnVpnService() {
             dailySimKB = bandwidthStatus.usage.dailySimBytes / 1_024.0
             wifiLimited = bandwidthStatus.wifiLimited
             simLimited = bandwidthStatus.simLimited
-            broadcastTrafficStats(trafficUpdate.totals, wifiBps, simBps)
+            broadcastTrafficStats(
+                trafficUpdate.totals,
+                wifiBps,
+                simBps,
+                pairUpdate?.pairShareBps ?: 0L,
+                pairUpdate?.receivingPeerNames ?: emptyList(),
+            )
             statsHandler.postDelayed(this, 1000)
         }
     }
@@ -103,6 +120,7 @@ class AdGuardProxyService : MqvpnVpnService() {
     override fun onCreate() {
         super.onCreate()
         bandwidthEnforcer = BandwidthEnforcer(this, ::setPathRateLimits)
+        pairShareRepository = PairShareRepository(this)
         createNotificationChannel()
     }
 
@@ -128,8 +146,7 @@ class AdGuardProxyService : MqvpnVpnService() {
         if (!isRunning.compareAndSet(false, true)) return
 
         if (intent.getBooleanExtra(GlorytunConstants.EXTRA_PAIR_SHARE_RECEIVE, false)) {
-            val pairRepository = PairShareRepository(this)
-            if (!pairRepository.isReceivingEnabled()) {
+            if (!pairShareRepository.isReceivingEnabled()) {
                 Log.w(TAG, "PairBond receive was requested while receiving is disabled")
                 isRunning.set(false)
                 sendState(ConnectionStates.DISCONNECTED)
@@ -150,6 +167,7 @@ class AdGuardProxyService : MqvpnVpnService() {
             startForegroundNotification(port, "Pair & Share 接続を開始しています")
             resetProxyState()
             sendState(ConnectionStates.PROXY_CONNECTING)
+            startStats()
             startLocalProxy()
             return
         }
@@ -681,6 +699,7 @@ class AdGuardProxyService : MqvpnVpnService() {
 
     private fun startStats() {
         pathTrafficAccumulator.reset()
+        pairBondTrafficAccumulator.reset()
         bandwidthHistory.clear()
         val bandwidthStatus = bandwidthEnforcer.onTick(latestPaths, 0f, 0f)
         dailyWifiKB = bandwidthStatus.usage.dailyWifiBytes / 1_024.0
@@ -695,6 +714,7 @@ class AdGuardProxyService : MqvpnVpnService() {
         statsHandler.removeCallbacks(statsRunnable)
         bandwidthEnforcer.stop()
         pathTrafficAccumulator.reset()
+        pairBondTrafficAccumulator.reset()
         bandwidthHistory.clear()
         latestPaths = emptyList()
     }
@@ -769,6 +789,8 @@ class AdGuardProxyService : MqvpnVpnService() {
         totals: NetworkTrafficTotals,
         wifiBps: Long,
         simBps: Long,
+        pairShareBps: Long,
+        pairSharePeerNames: List<String>,
     ) {
         sendBroadcast(Intent(GlorytunConstants.ACTION_VPN_TRAFFIC_STATS).apply {
             setPackage(packageName)
@@ -780,6 +802,8 @@ class AdGuardProxyService : MqvpnVpnService() {
             putExtra("sim_active", totals.simActive)
             putExtra("wifi_bps", wifiBps)
             putExtra("sim_bps", simBps)
+            putExtra("pair_share_bps", pairShareBps)
+            putStringArrayListExtra("pair_share_peer_names", ArrayList(pairSharePeerNames))
             putExtra("stats_source", GlorytunConstants.STATE_SOURCE_PROXY)
             putExtra("daily_wifi_kb", dailyWifiKB)
             putExtra("daily_sim_kb", dailySimKB)

@@ -356,6 +356,10 @@ object PairShareCoordinator {
         }
     }
 
+    fun currentPeerStats(): List<PairSharePeerStats> = synchronized(runtimeStats) {
+        runtimeStats.values.toList()
+    }
+
     private fun clientForActivePeer(context: Context): PairShareClient {
         val repository = PairShareRepository(context)
         val peer = repository.activeReceivePeer()

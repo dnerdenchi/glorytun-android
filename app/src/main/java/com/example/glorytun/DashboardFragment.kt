@@ -3,7 +3,6 @@ package com.example.glorytun
 import android.content.Context
 import android.net.VpnService
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -33,7 +32,7 @@ class DashboardFragment : Fragment() {
     private lateinit var tvPairShareStatus: TextView
     private lateinit var btnConnect: Button
     private lateinit var trafficGraph: TrafficGraphView
-    private val pairShareSpeedHold = TrafficRateDisplayHold()
+    private var pairShareTrafficSnapshot = PairShareTrafficSnapshot()
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -86,6 +85,9 @@ class DashboardFragment : Fragment() {
         viewModel.simKBs.observe(viewLifecycleOwner) { kbs ->
             tvSimSpeed.text = if (kbs > 0) viewModel.formatBps(kbs) else "-- kbps"
         }
+
+        viewModel.pairShareKBs.observe(viewLifecycleOwner) { renderPairShareTraffic(pairShareTrafficSnapshot) }
+        viewModel.pairSharePeerNames.observe(viewLifecycleOwner) { renderPairShareTraffic(pairShareTrafficSnapshot) }
 
         viewModel.wifiDailyBytes.observe(viewLifecycleOwner) { bytes ->
             tvWifiTotal.text = "今日: ${viewModel.formatBytes(bytes)}"
@@ -207,29 +209,19 @@ class DashboardFragment : Fragment() {
     }
 
     private fun renderPairShareTraffic(snapshot: PairShareTrafficSnapshot) {
-        val receivingPeers = snapshot.receivingPeerNames.joinToString("・")
-        val displayedPairRate = if (snapshot.receiving) {
-            pairShareSpeedHold.update(
-                snapshot.receivedBytesPerSecond / 1024f,
-                SystemClock.elapsedRealtime(),
-            )
-        } else {
-            pairShareSpeedHold.reset()
-            0f
-        }
-        tvPairShareSpeed.text = if (snapshot.receiving && receivingPeers.isNotBlank()) {
+        pairShareTrafficSnapshot = snapshot
+        val receivingPeers = viewModel.pairSharePeerNames.value.orEmpty().joinToString("・")
+        val displayedPairRate = viewModel.pairShareKBs.value ?: 0f
+        tvPairShareSpeed.text = if (receivingPeers.isNotBlank()) {
             "$receivingPeers · ${viewModel.formatBps(displayedPairRate)}"
         } else {
             "-- kbps"
         }
         tvPairShareStatus.text = when {
-            snapshot.receiving -> "共有された速度"
+            receivingPeers.isNotBlank() || snapshot.receiving -> "共有された速度"
             snapshot.sharing -> "共有先で表示"
             else -> "未使用"
         }
-        viewModel.addPairShareRealtimePoint(
-            if (snapshot.receiving) snapshot.receivedBytesPerSecond else 0L,
-        )
     }
 
     private fun startVpnConnection() {
