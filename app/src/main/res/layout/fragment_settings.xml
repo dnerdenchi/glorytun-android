@@ -346,9 +346,10 @@
                     android:textSize="12sp" />
 
                 <TextView
+                    android:id="@+id/tv_mqvpn_version"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="arm64-v8a"
+                    android:text="-"
                     android:textColor="@color/on_surface"
                     android:textSize="12sp" />
 

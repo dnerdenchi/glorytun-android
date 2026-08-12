@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
+import com.mqvpn.sdk.core.MqvpnSdk
 import kotlinx.coroutines.launch
 
 class SettingsFragment : Fragment() {
@@ -92,6 +93,7 @@ class SettingsFragment : Fragment() {
         val checkButton = view.findViewById<MaterialButton>(R.id.btn_check_update)
 
         view.findViewById<TextView>(R.id.tv_app_version)?.text = BuildConfig.VERSION_NAME
+        view.findViewById<TextView>(R.id.tv_mqvpn_version)?.text = MqvpnSdk.getVersion()
 
         checkButton?.setOnClickListener {
             val activity = activity as? AppCompatActivity ?: return@setOnClickListener
