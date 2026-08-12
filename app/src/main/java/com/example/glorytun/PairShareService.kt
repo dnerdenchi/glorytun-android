@@ -68,6 +68,9 @@ class PairShareService : Service() {
     private var registeredService: NsdServiceInfo? = null
 
     @Volatile
+    private var registrationListener: NsdManager.RegistrationListener? = null
+
+    @Volatile
     private var discoveryListener: NsdManager.DiscoveryListener? = null
 
     @Volatile
@@ -93,24 +96,6 @@ class PairShareService : Service() {
         override fun onLost(network: Network) {
             if (network == wifiNetwork) scheduleLanRefresh()
         }
-    }
-
-    private val registrationListener = object : NsdManager.RegistrationListener {
-        override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-            registeredService = null
-            serviceStatus = "LAN 共有の公開に失敗しました"
-            publishState()
-        }
-
-        override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-            Log.w(TAG, "Pair & Share NSD 登録を解除できませんでした: $errorCode")
-        }
-
-        override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-            registeredService = serviceInfo
-        }
-
-        override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
     }
 
     override fun onCreate() {
@@ -211,6 +196,9 @@ class PairShareService : Service() {
             publishState()
             return
         }
+        synchronized(lanLock) {
+            if (wifiNetwork == network && serverSocket?.isClosed == false) return
+        }
 
         val server = runCatching {
             ServerSocket().apply {
@@ -279,19 +267,45 @@ class PairShareService : Service() {
             setAttribute("name", repository.displayName())
             setAttribute("version", PairShareWire.VERSION.toString())
         }
+        lateinit var listener: NsdManager.RegistrationListener
+        listener = object : NsdManager.RegistrationListener {
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                if (registrationListener !== listener) return
+                registrationListener = null
+                registeredService = null
+                serviceStatus = "LAN 共有の公開に失敗しました"
+                publishState()
+            }
+
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                Log.w(TAG, "Pair & Share NSD 登録を解除できませんでした: $errorCode")
+            }
+
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                if (registrationListener === listener) registeredService = serviceInfo
+            }
+
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
+        }
+        registrationListener = listener
         registeredService = info
         runCatching {
-            nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, registrationListener)
+            nsdManager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
         }.onFailure { error ->
+            if (registrationListener === listener) {
+                registrationListener = null
+                registeredService = null
+            }
             Log.w(TAG, "Pair & Share NSD 登録に失敗", error)
             serviceStatus = "LAN 検出を開始できませんでした"
         }
     }
 
     private fun unregisterNsdService() {
-        if (registeredService == null) return
+        val listener = registrationListener ?: return
+        registrationListener = null
         registeredService = null
-        runCatching { nsdManager.unregisterService(registrationListener) }
+        runCatching { nsdManager.unregisterService(listener) }
     }
 
     private fun startDiscovery() {

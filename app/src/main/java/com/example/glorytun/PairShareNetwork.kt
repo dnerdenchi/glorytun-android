@@ -15,11 +15,20 @@ object PairShareNetwork {
     fun activeWifi(context: Context): Network? {
         val manager = context.getSystemService(ConnectivityManager::class.java)
         return manager.allNetworks.firstOrNull { network ->
-            manager.getNetworkCapabilities(network)
-                ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
-                localIpv4(context, network) != null
+            val capabilities = manager.getNetworkCapabilities(network)
+            isLanWifiCandidate(
+                hasWifiTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true,
+                isNotVpn = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == true,
+                hasLocalIpv4 = localIpv4(context, network) != null,
+            )
         }
     }
+
+    internal fun isLanWifiCandidate(
+        hasWifiTransport: Boolean,
+        isNotVpn: Boolean,
+        hasLocalIpv4: Boolean,
+    ): Boolean = hasWifiTransport && isNotVpn && hasLocalIpv4
 
     /**
      * Returns an underlying cellular network rather than the app's VPN default
@@ -67,6 +76,7 @@ object PairShareNetwork {
 
     fun wifiNetworkRequest(): NetworkRequest = NetworkRequest.Builder()
         .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+        .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
         .build()
 
     /** Prevent a paired device from using this feature as an internal-network pivot. */

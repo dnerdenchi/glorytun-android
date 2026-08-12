@@ -136,6 +136,10 @@ class MainActivity : AppCompatActivity() {
         ensureNotificationChannel()
         requestNotificationPermissionIfNeeded()
 
+        if (PairShareRepository(this).isEnabled()) {
+            PairShareService.start(this)
+        }
+
         // 旧設定が存在する場合はプロファイルに移行
         val legacyIp = prefs.getString("IP", "") ?: ""
         val legacyPort = prefs.getString("PORT", MqvpnConfigFactory.DEFAULT_PORT)

@@ -217,14 +217,9 @@ class PairShareFragment : Fragment() {
             "\n累計 ↑" + formatBytes(stats.txBytes) + "  ↓" + formatBytes(stats.rxBytes)
     }
 
-    private fun formatRate(bytesPerSecond: Long): String = formatBytes(bytesPerSecond) + "/s"
+    private fun formatRate(bytesPerSecond: Long): String = formatPairShareBytes(bytesPerSecond) + "/s"
 
-    private fun formatBytes(bytes: Long): String = when {
-        bytes >= 1_000_000_000L -> (bytes / 1_000_000_000L).toString() + " GB"
-        bytes >= 1_000_000L -> (bytes / 1_000L).toString() + " MB"
-        bytes >= 1_000L -> (bytes / 1_000L).toString() + " KB"
-        else -> bytes.toString() + " B"
-    }
+    private fun formatBytes(bytes: Long): String = formatPairShareBytes(bytes)
 
     private fun showPathPriorityDialog(peer: PairSharePeer) {
         val priorities = arrayOf(
@@ -240,7 +235,6 @@ class PairShareFragment : Fragment() {
         var selected = priorities.indexOf(repository.pathPriority(peer)).coerceAtLeast(0)
         AlertDialog.Builder(requireContext())
             .setTitle(peer.displayName + " のパス設定")
-            .setMessage("複数の「自動ボンディング」パスは同時に使用します。バックアップ専用は通常のパスが利用不能な時だけ使います。")
             .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
             .setNegativeButton("キャンセル", null)
             .setPositiveButton("保存") { _, _ ->
@@ -286,8 +280,7 @@ class PairShareFragment : Fragment() {
         val labels = arrayOf("1 Mbps", "5 Mbps", "10 Mbps", "25 Mbps", "50 Mbps", "上限なし")
         var selected = limits.indexOf(peer.speedLimitMbps).takeIf { it >= 0 } ?: 2
         AlertDialog.Builder(requireContext())
-            .setTitle("${peer.displayName} への共有")
-            .setMessage("共有を有効にすると、相手端末はこの端末のSIM回線を PairBond の暗号化パスとして利用できます。上限はこの端末で強制します。")
+            .setTitle("${peer.displayName} への共有速度上限")
             .setSingleChoiceItems(labels, selected) { _, which -> selected = which }
             .setNegativeButton(if (peer.canUseMyConnection) "共有を停止" else "キャンセル") { _, _ ->
                 if (peer.canUseMyConnection) {
@@ -381,4 +374,11 @@ class PairShareFragment : Fragment() {
         }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+}
+
+internal fun formatPairShareBytes(bytes: Long): String = when {
+    bytes >= 1_000_000_000L -> (bytes / 1_000_000_000L).toString() + " GB"
+    bytes >= 1_000_000L -> (bytes / 1_000_000L).toString() + " MB"
+    bytes >= 1_000L -> (bytes / 1_000L).toString() + " KB"
+    else -> bytes.toString() + " B"
 }

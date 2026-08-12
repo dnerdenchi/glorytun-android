@@ -111,6 +111,7 @@ class PairBondSession(
     @Synchronized
     fun refreshPaths() {
         if (closed.get()) return
+        val now = SystemClock.elapsedRealtime()
         val byId = repository.peers().associateBy { it.id }
         paths.entries.toList().forEach { (id, managed) ->
             val peer = byId[id]
@@ -129,7 +130,16 @@ class PairBondSession(
             val managed = paths.getOrPut(peer.id) { ManagedPath(peer, priority) }
             managed.peer = peer
             managed.priority = priority
-            if (managed.transport == null && !managed.connecting.get()) connect(managed)
+            if (shouldStartPairBondConnection(
+                    hasTransport = managed.transport != null,
+                    connecting = managed.connecting.get(),
+                    nowMillis = now,
+                    lastAttemptMillis = managed.lastAttemptMillis,
+                    reconnectIntervalMillis = RECONNECT_INTERVAL_MILLIS,
+                )
+            ) {
+                connect(managed)
+            }
         }
         lastRepositoryRefresh = SystemClock.elapsedRealtime()
         publishStats()
@@ -394,7 +404,14 @@ class PairBondSession(
         if (now - lastRepositoryRefresh >= REPOSITORY_REFRESH_MILLIS) refreshPaths()
         paths.values.forEach { managed ->
             val path = managed.transport
-            if (path == null && !managed.connecting.get() && now - managed.lastAttemptMillis >= RECONNECT_INTERVAL_MILLIS) {
+            if (shouldStartPairBondConnection(
+                    hasTransport = path != null,
+                    connecting = managed.connecting.get(),
+                    nowMillis = now,
+                    lastAttemptMillis = managed.lastAttemptMillis,
+                    reconnectIntervalMillis = RECONNECT_INTERVAL_MILLIS,
+                )
+            ) {
                 connect(managed)
             } else if (path != null && path.isAlive()) {
                 if (now - managed.lastPongMillis > PATH_STALE_MILLIS) {
@@ -495,6 +512,16 @@ class PairBondSession(
         private const val PATH_STALE_MILLIS = 15_000L
     }
 }
+
+internal fun shouldStartPairBondConnection(
+    hasTransport: Boolean,
+    connecting: Boolean,
+    nowMillis: Long,
+    lastAttemptMillis: Long,
+    reconnectIntervalMillis: Long,
+): Boolean = !hasTransport &&
+    !connecting &&
+    nowMillis - lastAttemptMillis >= reconnectIntervalMillis
 
 class PairBondTcpStream internal constructor(
     private val session: PairBondSession,
