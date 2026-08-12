@@ -321,6 +321,8 @@ class PairBondSession(
         managed.lastAttemptMillis = SystemClock.elapsedRealtime()
         ioExecutor.execute {
             try {
+                val trafficSessionId = PairShareTrafficMonitor.newSessionId("receive")
+                val tracksPairShareTraffic = managed.kind == PairBondPathKind.PAIRED_CELLULAR
                 val clientPath = PairBondClientPath(
                     pathId = managed.id,
                     config = config,
@@ -329,7 +331,26 @@ class PairBondSession(
                     stats = managed.stats,
                     connectionFactory = { openPathConnection(managed) },
                     onFrame = { path, frame -> onFrame(managed, path, frame) },
-                    onClosed = { path, error -> onPathClosed(managed, path, error) },
+                    onConnected = {
+                        if (tracksPairShareTraffic) {
+                            PairShareTrafficMonitor.startSession(
+                                context = appContext,
+                                sessionId = trafficSessionId,
+                                peerName = managed.displayName,
+                                role = PairShareTrafficRole.RECEIVING,
+                            )
+                        }
+                    },
+                    onBytesSent = { bytes ->
+                        if (tracksPairShareTraffic) PairShareTrafficMonitor.recordSent(trafficSessionId, bytes)
+                    },
+                    onBytesReceived = { bytes ->
+                        if (tracksPairShareTraffic) PairShareTrafficMonitor.recordReceived(trafficSessionId, bytes)
+                    },
+                    onClosed = { path, error ->
+                        if (tracksPairShareTraffic) PairShareTrafficMonitor.endSession(trafficSessionId)
+                        onPathClosed(managed, path, error)
+                    },
                 )
                 clientPath.connect()
                 if (closed.get() || managed.priority == PairBondPathPriority.DISABLED) {
@@ -863,6 +884,9 @@ private class PairBondClientPath(
     val stats: PairBondPathStats,
     private val connectionFactory: () -> PairBondPathConnection,
     private val onFrame: (PairBondClientPath, PairBondFrame) -> Unit,
+    private val onConnected: () -> Unit,
+    private val onBytesSent: (Long) -> Unit,
+    private val onBytesReceived: (Long) -> Unit,
     private val onClosed: (PairBondClientPath, Throwable?) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -901,6 +925,7 @@ private class PairBondClientPath(
                     ),
                 )
             }
+            onConnected()
             Thread(::readLoop, "pair-bond-" + pathId.takeLast(12)).apply {
                 isDaemon = true
                 start()
@@ -918,6 +943,7 @@ private class PairBondClientPath(
         if (closed.get()) throw IOException("PairBond パスは閉じられています")
         current.send(frame)
         stats.sent(frame.payload.size.toLong())
+        onBytesSent(frame.userTrafficBytes())
     }
 
     private fun readLoop() {
@@ -926,6 +952,7 @@ private class PairBondClientPath(
             while (!closed.get()) {
                 val frame = codec?.read() ?: break
                 stats.received(frame.payload.size.toLong())
+                onBytesReceived(frame.userTrafficBytes())
                 onFrame(this, frame)
             }
         } catch (error: Throwable) {
@@ -948,6 +975,14 @@ private class PairBondClientPath(
     companion object {
         private const val IO_BUFFER_BYTES = 96 * 1024
     }
+}
+
+internal fun PairBondFrame.userTrafficBytes(): Long = when (type) {
+    PairBondFrameType.TCP_DATA -> payload.size.toLong()
+    PairBondFrameType.UDP_DATA -> runCatching {
+        PairBondPayload.parseUdpDatagram(payload).payload.size.toLong()
+    }.getOrDefault(0L)
+    else -> 0L
 }
 
 private class PairBondPathStats(

@@ -456,6 +456,8 @@ internal class PairShareHostSession(
     private val sharingAllowed: () -> Boolean,
     private val bondingAllowed: () -> Boolean,
     speedLimitMbps: () -> Int,
+    private val onBytesSent: (Long) -> Unit,
+    private val onBytesReceived: (Long) -> Unit,
     private val onClosed: () -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -472,13 +474,16 @@ internal class PairShareHostSession(
                 when (frame.type) {
                     PairShareFrameType.OPEN_TCP -> openTcp(frame)
                     PairShareFrameType.OPEN_BOND_PATH -> openBondPath(frame)
-                    PairShareFrameType.TCP_DATA ->
+                    PairShareFrameType.TCP_DATA -> {
+                        onBytesReceived(frame.payload.size.toLong())
                         (tcpRelays[frame.streamId] ?: bondTcpRelays[frame.streamId])?.write(frame.payload)
+                    }
                     PairShareFrameType.CLOSE_TCP ->
                         (tcpRelays.remove(frame.streamId) ?: bondTcpRelays.remove(frame.streamId))?.close()
                     PairShareFrameType.OPEN_UDP -> openUdp(frame)
                     PairShareFrameType.UDP_DATA -> {
                         val datagram = PairSharePayload.parseUdpDatagram(frame.payload)
+                        onBytesReceived(datagram.payload.size.toLong())
                         udpRelays[frame.streamId]?.send(datagram.host, datagram.port, datagram.payload)
                     }
                     PairShareFrameType.CLOSE_UDP -> udpRelays.remove(frame.streamId)?.close()
@@ -515,6 +520,7 @@ internal class PairShareHostSession(
             codec = codec,
             rateLimiter = rateLimiter,
             executor = ioExecutor,
+            onBytesSent = onBytesSent,
             onClosed = { id -> tcpRelays.remove(id) },
         )
         val started = runCatching { relay.start(target.host, target.port) }
@@ -556,6 +562,7 @@ internal class PairShareHostSession(
             executor = ioExecutor,
             allowed = bondingAllowed,
             connectionFactory = { host, port -> PairShareNetwork.openCellularSocket(context, host, port) },
+            onBytesSent = onBytesSent,
             onClosed = { id -> bondTcpRelays.remove(id) },
         )
         val started = runCatching { relay.start(target.host, target.port) }
@@ -587,6 +594,7 @@ internal class PairShareHostSession(
                 codec = codec,
                 rateLimiter = rateLimiter,
                 executor = ioExecutor,
+                onBytesSent = onBytesSent,
                 onClosed = { id -> udpRelays.remove(id) },
             ).also(PairShareHostUdpRelay::start)
         }
@@ -631,6 +639,7 @@ private class PairShareHostTcpRelay(
     private val executor: ExecutorService,
     private val allowed: () -> Boolean = { true },
     private val connectionFactory: ((String, Int) -> Socket)? = null,
+    private val onBytesSent: (Long) -> Unit,
     private val onClosed: (Int) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -682,6 +691,7 @@ private class PairShareHostTcpRelay(
                 if (read > 0 && allowed()) {
                     rateLimiter.acquire(read)
                     codec.send(PairShareFrameType.TCP_DATA, streamId, buffer.copyOf(read))
+                    onBytesSent(read.toLong())
                 }
             }
         } catch (_: IOException) {
@@ -708,6 +718,7 @@ private class PairShareHostUdpRelay(
     private val codec: PairShareFrameCodec,
     private val rateLimiter: PairShareRateLimiter,
     private val executor: ExecutorService,
+    private val onBytesSent: (Long) -> Unit,
     private val onClosed: (Int) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
@@ -742,6 +753,7 @@ private class PairShareHostUdpRelay(
                     streamId,
                     PairSharePayload.udpDatagram(packet.address.hostAddress, packet.port, payload),
                 )
+                onBytesSent(payload.size.toLong())
             }
         } catch (_: IOException) {
             // Closing the association interrupts receive().

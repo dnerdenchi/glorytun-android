@@ -560,6 +560,7 @@ class PairShareService : Service() {
 
         socket.soTimeout = 0
         val sessionKey = PairShareCrypto.deriveSessionKey(pairKey, clientNonce, serverNonce)
+        val trafficSessionId = PairShareTrafficMonitor.newSessionId("share")
         lateinit var session: PairShareHostSession
         session = PairShareHostSession(
             context = this,
@@ -576,9 +577,20 @@ class PairShareService : Service() {
             speedLimitMbps = {
                 repository.peer(clientId)?.speedLimitMbps ?: PairSharePeer.DEFAULT_SPEED_LIMIT_MBPS
             },
-            onClosed = { hostSessions.remove(session) },
+            onBytesSent = { bytes -> PairShareTrafficMonitor.recordSent(trafficSessionId, bytes) },
+            onBytesReceived = { bytes -> PairShareTrafficMonitor.recordReceived(trafficSessionId, bytes) },
+            onClosed = {
+                hostSessions.remove(session)
+                PairShareTrafficMonitor.endSession(trafficSessionId)
+            },
         )
         hostSessions.add(session)
+        PairShareTrafficMonitor.startSession(
+            context = this,
+            sessionId = trafficSessionId,
+            peerName = peer.displayName,
+            role = PairShareTrafficRole.SHARING,
+        )
         session.run()
     }
 

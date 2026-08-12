@@ -16,6 +16,7 @@ class StatsFragment : Fragment() {
     private lateinit var tvTotalData: TextView
     private lateinit var tvWifiTotal: TextView
     private lateinit var tvSimTotal: TextView
+    private lateinit var tvPairShareTotal: TextView
     private lateinit var tvAvgSpeed: TextView
     private lateinit var tvMaxThroughput: TextView
     private lateinit var statsGraph: TrafficGraphView
@@ -38,6 +39,7 @@ class StatsFragment : Fragment() {
         tvTotalData = view.findViewById(R.id.tv_total_data)
         tvWifiTotal = view.findViewById(R.id.tv_wifi_total)
         tvSimTotal = view.findViewById(R.id.tv_sim_total)
+        tvPairShareTotal = view.findViewById(R.id.tv_pair_share_total)
         tvAvgSpeed = view.findViewById(R.id.tv_avg_speed)
         tvMaxThroughput = view.findViewById(R.id.tv_max_throughput)
         statsGraph = view.findViewById(R.id.stats_traffic_graph)
@@ -64,6 +66,10 @@ class StatsFragment : Fragment() {
 
         setupFilterButtons()
         observeViewModel()
+        PairShareTrafficMonitor.initialize(requireContext())
+        PairShareTrafficMonitor.state.observe(viewLifecycleOwner) {
+            updateGraphForFilter(currentFilter)
+        }
 
         updateGraphForFilter(currentFilter)
     }
@@ -131,6 +137,9 @@ class StatsFragment : Fragment() {
             }.timeInMillis
             else -> now - 86_400_000L
         }
+        tvPairShareTotal.text = viewModel.formatBytes(
+            PairShareTrafficMonitor.usageSince(requireContext(), cutoffMs).totalBytes,
+        )
 
         // historicalPoints（時間集計）とtrafficHistory（現セッション毎秒）をマージ
         // trafficHistoryの最初のタイムスタンプより前のhistoricalPointsのみ使用して二重カウントを防ぐ

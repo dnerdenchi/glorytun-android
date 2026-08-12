@@ -28,6 +28,12 @@ class DashboardFragment : Fragment() {
     private lateinit var tvTotalData: TextView
     private lateinit var tvWifiThrottledBadge: TextView
     private lateinit var tvSimThrottledBadge: TextView
+    private lateinit var pairShareCard: View
+    private lateinit var tvPairShareRole: TextView
+    private lateinit var tvPairSharePeers: TextView
+    private lateinit var tvPairShareTxSpeed: TextView
+    private lateinit var tvPairShareRxSpeed: TextView
+    private lateinit var tvPairShareUsage: TextView
     private lateinit var btnConnect: Button
     private lateinit var trafficGraph: TrafficGraphView
 
@@ -59,6 +65,12 @@ class DashboardFragment : Fragment() {
         tvTotalData = view.findViewById(R.id.tv_total_data)
         tvWifiThrottledBadge = view.findViewById(R.id.tv_wifi_throttled_badge)
         tvSimThrottledBadge = view.findViewById(R.id.tv_sim_throttled_badge)
+        pairShareCard = view.findViewById(R.id.pair_share_card)
+        tvPairShareRole = view.findViewById(R.id.tv_pair_share_role)
+        tvPairSharePeers = view.findViewById(R.id.tv_pair_share_peers)
+        tvPairShareTxSpeed = view.findViewById(R.id.tv_pair_share_tx_speed)
+        tvPairShareRxSpeed = view.findViewById(R.id.tv_pair_share_rx_speed)
+        tvPairShareUsage = view.findViewById(R.id.tv_pair_share_usage)
         btnConnect = view.findViewById(R.id.btn_connect)
         trafficGraph = view.findViewById(R.id.traffic_graph)
 
@@ -117,6 +129,9 @@ class DashboardFragment : Fragment() {
                 viewModel.realtimeSimRates.toList()
             )
         }
+
+        PairShareTrafficMonitor.initialize(requireContext())
+        PairShareTrafficMonitor.state.observe(viewLifecycleOwner, ::renderPairShareTraffic)
 
         btnConnect.setOnClickListener {
             val state = viewModel.connectionState.value
@@ -193,6 +208,21 @@ class DashboardFragment : Fragment() {
     private fun updateTotalData() {
         val total = (viewModel.wifiDailyBytes.value ?: 0L) + (viewModel.simDailyBytes.value ?: 0L)
         tvTotalData.text = viewModel.formatBytes(total)
+    }
+
+    private fun renderPairShareTraffic(snapshot: PairShareTrafficSnapshot) {
+        pairShareCard.visibility = if (snapshot.active) View.VISIBLE else View.GONE
+        if (!snapshot.active) return
+        tvPairShareRole.text = when {
+            snapshot.sharing && snapshot.receiving -> "共有・受信中"
+            snapshot.sharing -> "共有中"
+            else -> "受信中"
+        }
+        tvPairSharePeers.text = snapshot.peerNames.joinToString("、").ifBlank { "ペア端末" }
+        tvPairShareTxSpeed.text = viewModel.formatBytes(snapshot.txBytesPerSecond) + "/s"
+        tvPairShareRxSpeed.text = viewModel.formatBytes(snapshot.rxBytesPerSecond) + "/s"
+        val sessionBytes = snapshot.sessionTxBytes + snapshot.sessionRxBytes
+        tvPairShareUsage.text = "この接続: ${viewModel.formatBytes(sessionBytes)} ・ 今日: ${viewModel.formatBytes(snapshot.todayBytes)}"
     }
 
     private fun startVpnConnection() {
