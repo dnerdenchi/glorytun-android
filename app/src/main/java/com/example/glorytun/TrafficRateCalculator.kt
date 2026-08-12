@@ -7,6 +7,35 @@ data class TrafficRates(
     val simTotalBytes: Long
 )
 
+internal fun selectTrafficRate(counterKBs: Float, measuredBps: Long?): Float {
+    val measuredKBs = measuredBps?.coerceAtLeast(0L)?.div(8192f) ?: 0f
+    return maxOf(counterKBs.coerceAtLeast(0f), measuredKBs)
+}
+
+internal class TrafficRateDisplayHold(private val holdMillis: Long = 5_000L) {
+    private var lastActiveRate = 0f
+    private var lastActiveAt = Long.MIN_VALUE
+
+    fun update(rateKBs: Float, nowMillis: Long): Float {
+        val safeRate = rateKBs.coerceAtLeast(0f)
+        if (safeRate > 0f) {
+            lastActiveRate = safeRate
+            lastActiveAt = nowMillis
+            return safeRate
+        }
+        return if (lastActiveAt != Long.MIN_VALUE && nowMillis - lastActiveAt <= holdMillis) {
+            lastActiveRate
+        } else {
+            0f
+        }
+    }
+
+    fun reset() {
+        lastActiveRate = 0f
+        lastActiveAt = Long.MIN_VALUE
+    }
+}
+
 class TrafficRateCalculator {
     private var previousWifiTotal: Long? = null
     private var previousSimTotal: Long? = null

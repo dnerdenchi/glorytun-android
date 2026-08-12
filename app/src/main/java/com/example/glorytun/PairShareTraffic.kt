@@ -26,11 +26,66 @@ data class PairShareTrafficSnapshot(
     val receiving: Boolean = false,
     val txBytesPerSecond: Long = 0L,
     val rxBytesPerSecond: Long = 0L,
+    val receivedBytesPerSecond: Long = 0L,
+    val receivingPeerNames: List<String> = emptyList(),
     val sessionTxBytes: Long = 0L,
     val sessionRxBytes: Long = 0L,
     val todayBytes: Long = 0L,
 ) {
     val active: Boolean get() = activeSessionCount > 0
+}
+
+internal data class PairShareRateCounters(
+    val sessionId: String,
+    val peerName: String,
+    val role: PairShareTrafficRole,
+    val txBytes: Long,
+    val rxBytes: Long,
+)
+
+internal data class PairShareRateSample(
+    val txBytesPerSecond: Long = 0L,
+    val rxBytesPerSecond: Long = 0L,
+    val receivedBytesPerSecond: Long = 0L,
+    val receivingPeerNames: List<String> = emptyList(),
+)
+
+internal class PairShareRateTracker {
+    private data class Baseline(val txBytes: Long, val rxBytes: Long)
+
+    private val baselines = mutableMapOf<String, Baseline>()
+
+    fun sample(
+        sessions: Collection<PairShareRateCounters>,
+        elapsedMillis: Long,
+    ): PairShareRateSample {
+        val elapsed = elapsedMillis.coerceAtLeast(1L)
+        var txDelta = 0L
+        var rxDelta = 0L
+        var receivedDelta = 0L
+        val receivingPeers = linkedSetOf<String>()
+
+        sessions.forEach { session ->
+            val baseline = baselines[session.sessionId] ?: Baseline(0L, 0L)
+            val sessionTxDelta = (session.txBytes - baseline.txBytes).coerceAtLeast(0L)
+            val sessionRxDelta = (session.rxBytes - baseline.rxBytes).coerceAtLeast(0L)
+            txDelta += sessionTxDelta
+            rxDelta += sessionRxDelta
+            if (session.role == PairShareTrafficRole.RECEIVING) {
+                receivedDelta += sessionTxDelta + sessionRxDelta
+                receivingPeers += session.peerName
+            }
+            baselines[session.sessionId] = Baseline(session.txBytes, session.rxBytes)
+        }
+        baselines.keys.retainAll(sessions.mapTo(mutableSetOf(), PairShareRateCounters::sessionId))
+
+        return PairShareRateSample(
+            txBytesPerSecond = txDelta * 1_000L / elapsed,
+            rxBytesPerSecond = rxDelta * 1_000L / elapsed,
+            receivedBytesPerSecond = receivedDelta * 1_000L / elapsed,
+            receivingPeerNames = receivingPeers.toList(),
+        )
+    }
 }
 
 data class PairShareUsagePoint(
@@ -150,8 +205,6 @@ object PairShareTrafficMonitor {
         val role: PairShareTrafficRole,
         var txBytes: Long = 0L,
         var rxBytes: Long = 0L,
-        var sampledTxBytes: Long = 0L,
-        var sampledRxBytes: Long = 0L,
         var accountedTxBytes: Long = 0L,
         var accountedRxBytes: Long = 0L,
     )
@@ -163,6 +216,7 @@ object PairShareTrafficMonitor {
     private val scheduler = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "pair-share-traffic").apply { isDaemon = true }
     }
+    private val rateTracker = PairShareRateTracker()
 
     @Volatile private var store: PairShareUsageStore? = null
     private var lastSampleElapsed = SystemClock.elapsedRealtime()
@@ -178,7 +232,7 @@ object PairShareTrafficMonitor {
         if (store != null) return
         synchronized(lock) {
             if (store == null) store = PairShareUsageStore(context.applicationContext)
-            publishLocked(0L, 0L)
+            publishLocked(idleRateLocked())
         }
     }
 
@@ -194,7 +248,7 @@ object PairShareTrafficMonitor {
         synchronized(lock) {
             if (sessions.isEmpty()) lastSampleElapsed = SystemClock.elapsedRealtime()
             sessions[sessionId] = Session(peerName = peerName, role = role)
-            publishLocked(0L, 0L)
+            publishLocked(idleRateLocked())
         }
     }
 
@@ -212,7 +266,7 @@ object PairShareTrafficMonitor {
         synchronized(lock) {
             sessions.remove(sessionId)?.let(::accountLocked)
             flushLocked(force = sessions.isEmpty())
-            publishLocked(0L, 0L)
+            publishLocked(idleRateLocked())
         }
     }
 
@@ -232,17 +286,21 @@ object PairShareTrafficMonitor {
                 return
             }
             val elapsed = (now - lastSampleElapsed).coerceAtLeast(1L)
-            var txDelta = 0L
-            var rxDelta = 0L
-            sessions.values.forEach { session ->
-                txDelta += (session.txBytes - session.sampledTxBytes).coerceAtLeast(0L)
-                rxDelta += (session.rxBytes - session.sampledRxBytes).coerceAtLeast(0L)
-                session.sampledTxBytes = session.txBytes
-                session.sampledRxBytes = session.rxBytes
-            }
+            val rateSample = rateTracker.sample(
+                sessions.map { (sessionId, session) ->
+                    PairShareRateCounters(
+                        sessionId = sessionId,
+                        peerName = session.peerName,
+                        role = session.role,
+                        txBytes = session.txBytes,
+                        rxBytes = session.rxBytes,
+                    )
+                },
+                elapsed,
+            )
             accountAllLocked()
             flushLocked(force = now - lastFlushElapsed >= FLUSH_INTERVAL_MILLIS)
-            publishLocked(txDelta * 1_000L / elapsed, rxDelta * 1_000L / elapsed)
+            publishLocked(rateSample)
             lastSampleElapsed = now
         }
     }
@@ -267,7 +325,14 @@ object PairShareTrafficMonitor {
         lastFlushElapsed = SystemClock.elapsedRealtime()
     }
 
-    private fun publishLocked(txRate: Long, rxRate: Long) {
+    private fun idleRateLocked() = PairShareRateSample(
+        receivingPeerNames = sessions.values
+            .filter { it.role == PairShareTrafficRole.RECEIVING }
+            .map(Session::peerName)
+            .distinct(),
+    )
+
+    private fun publishLocked(rate: PairShareRateSample) {
         val todayStart = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -281,8 +346,10 @@ object PairShareTrafficMonitor {
                 peerNames = sessions.values.map(Session::peerName).distinct(),
                 sharing = sessions.values.any { it.role == PairShareTrafficRole.SHARING },
                 receiving = sessions.values.any { it.role == PairShareTrafficRole.RECEIVING },
-                txBytesPerSecond = txRate,
-                rxBytesPerSecond = rxRate,
+                txBytesPerSecond = rate.txBytesPerSecond,
+                rxBytesPerSecond = rate.rxBytesPerSecond,
+                receivedBytesPerSecond = rate.receivedBytesPerSecond,
+                receivingPeerNames = rate.receivingPeerNames,
                 sessionTxBytes = sessions.values.sumOf(Session::txBytes),
                 sessionRxBytes = sessions.values.sumOf(Session::rxBytes),
                 todayBytes = persistedToday + pendingTxBytes + pendingRxBytes,

@@ -21,7 +21,7 @@ BondVPN は Android の `VpnService` 上で [mqvpn](https://github.com/mp0rta/mq
 | 最小 Android | API 26 |
 | アプリ更新 | GitHub Releases の APK asset |
 
-`libmqvpn_jni.so` は [mqvpn v0.16.0公式Android APK](https://github.com/mp0rta/mqvpn/releases/tag/v0.16.0) に収録されたarm64-v8a版と同一です。元APKは公式 `SHA256SUMS` と照合しています。アプリの「システム情報」には、このネイティブライブラリが返す実バージョンを表示します。
+`libmqvpn_jni.so` は [mqvpn v0.16.0](https://github.com/mp0rta/mqvpn/releases/tag/v0.16.0) のソースに `native-patches/mqvpn-v0.16.0-path-rate-limit.patch` を適用してビルドしています。公式の Multipath QUIC 実装を維持しつつ、アプリの Wi-Fi/SIM 別帯域上限に必要な経路単位の送信制御を追加しています。アプリの「システム情報」には、ネイティブライブラリが返す実バージョンを表示します。
 
 ## Android アプリのビルド
 

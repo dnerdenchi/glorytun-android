@@ -22,6 +22,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     val realtimeWifiRates = ArrayDeque<Float>()
     val realtimeSimRates = ArrayDeque<Float>()
+    val realtimePairShareRates = ArrayDeque<Float>()
     val realtimeUpdated = MutableLiveData(0L)
 
     val connectionState = MutableLiveData(ConnectionStates.DISCONNECTED)
@@ -45,6 +46,8 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     val serverCheckCache = mutableMapOf<String, ServerCheckEntry>()
 
     private val trafficRateCalculator = TrafficRateCalculator()
+    private val wifiDisplayRate = TrafficRateDisplayHold()
+    private val simDisplayRate = TrafficRateDisplayHold()
 
     init {
         historicalPoints.addAll(trafficDataStore.load())
@@ -101,11 +104,11 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             simRx = simRx
         )
 
-        val sampledWifiKBs = measuredWifiBps?.div(8192f) ?: rates.wifiKBs
-        val sampledSimKBs = measuredSimBps?.div(8192f) ?: rates.simKBs
+        val sampledWifiKBs = selectTrafficRate(rates.wifiKBs, measuredWifiBps)
+        val sampledSimKBs = selectTrafficRate(rates.simKBs, measuredSimBps)
 
-        wifiKBs.value = sampledWifiKBs
-        simKBs.value = sampledSimKBs
+        wifiKBs.value = wifiDisplayRate.update(sampledWifiKBs, nowMs)
+        simKBs.value = simDisplayRate.update(sampledSimKBs, nowMs)
 
         if (sampledWifiKBs > (maxWifiKBs.value ?: 0f)) maxWifiKBs.value = sampledWifiKBs
         if (sampledSimKBs > (maxSimKBs.value ?: 0f)) maxSimKBs.value = sampledSimKBs
@@ -127,14 +130,23 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         realtimeUpdated.value = System.currentTimeMillis()
     }
 
+    fun addPairShareRealtimePoint(bytesPerSecond: Long) {
+        if (realtimePairShareRates.size >= MAX_REALTIME_POINTS) realtimePairShareRates.removeFirst()
+        realtimePairShareRates.addLast(bytesPerSecond.coerceAtLeast(0L) / 1024f)
+        realtimeUpdated.value = System.currentTimeMillis()
+    }
+
     fun resetRealtimeData() {
         realtimeWifiRates.clear()
         realtimeSimRates.clear()
+        realtimePairShareRates.clear()
         realtimeUpdated.postValue(0L)
     }
 
     fun resetTrafficBaselines(clearSessionHistory: Boolean = false) {
         trafficRateCalculator.reset()
+        wifiDisplayRate.reset()
+        simDisplayRate.reset()
         wifiKBs.value = 0f
         simKBs.value = 0f
         wifiTotalBytes.value = 0L

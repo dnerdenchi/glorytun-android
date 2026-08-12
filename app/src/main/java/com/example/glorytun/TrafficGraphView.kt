@@ -8,7 +8,7 @@ import android.util.AttributeSet
 import android.view.View
 
 /**
- * WiFi と SIM の通信スループット (KB/s) を折れ線グラフまたは棒グラフで表示するカスタムView。
+ * WiFi、SIM、Pair & Share の通信スループット (KB/s) を表示するカスタムView。
  * - 青: WiFi (TX+RX合計)
  * - オレンジ: SIM (TX+RX合計)
  * - barMode=true のとき棒グラフ（WiFi下段・SIM上段の積み上げ棒）を表示
@@ -32,6 +32,7 @@ class TrafficGraphView @JvmOverloads constructor(
 
     private val wifiRates = ArrayDeque<Float>()
     private val simRates  = ArrayDeque<Float>()
+    private val pairShareRates = ArrayDeque<Float>()
 
     private val wifiLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color       = context.getColor(R.color.wifi_color)
@@ -43,6 +44,14 @@ class TrafficGraphView @JvmOverloads constructor(
 
     private val simLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color       = context.getColor(R.color.sim_color)
+        strokeWidth = 4f
+        style       = Paint.Style.STROKE
+        strokeJoin  = Paint.Join.ROUND
+        strokeCap   = Paint.Cap.ROUND
+    }
+
+    private val pairShareLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color       = context.getColor(R.color.primary)
         strokeWidth = 4f
         style       = Paint.Style.STROKE
         strokeJoin  = Paint.Join.ROUND
@@ -92,25 +101,34 @@ class TrafficGraphView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
     }
 
-    fun addDataPoint(wifiKBs: Float, simKBs: Float) {
+    fun addDataPoint(wifiKBs: Float, simKBs: Float, pairShareKBs: Float = 0f) {
         if (wifiRates.size >= MAX_POINTS) wifiRates.removeFirst()
         if (simRates.size  >= MAX_POINTS) simRates.removeFirst()
+        if (pairShareRates.size >= MAX_POINTS) pairShareRates.removeFirst()
         wifiRates.addLast(wifiKBs.coerceAtLeast(0f))
         simRates.addLast(simKBs.coerceAtLeast(0f))
+        pairShareRates.addLast(pairShareKBs.coerceAtLeast(0f))
         invalidate()
     }
 
     fun reset() {
         wifiRates.clear()
         simRates.clear()
+        pairShareRates.clear()
         invalidate()
     }
 
-    fun setData(wifiData: List<Float>, simData: List<Float>) {
+    fun setData(
+        wifiData: List<Float>,
+        simData: List<Float>,
+        pairShareData: List<Float> = emptyList(),
+    ) {
         wifiRates.clear()
         simRates.clear()
+        pairShareRates.clear()
         wifiData.forEach { wifiRates.addLast(it.coerceAtLeast(0f)) }
         simData.forEach { simRates.addLast(it.coerceAtLeast(0f)) }
+        pairShareData.forEach { pairShareRates.addLast(it.coerceAtLeast(0f)) }
         invalidate()
     }
 
@@ -146,7 +164,7 @@ class TrafficGraphView @JvmOverloads constructor(
         val rawMax = if (barMode && wifiRates.size == simRates.size && wifiRates.isNotEmpty()) {
             (wifiRates.indices).maxOf { i -> wifiRates[i] + simRates[i] }
         } else {
-            (wifiRates.toList() + simRates.toList()).maxOrNull() ?: 0f
+            (wifiRates.toList() + simRates.toList() + pairShareRates.toList()).maxOrNull() ?: 0f
         }
 
         // グラフ描画上限 (plotMax) を決定
@@ -191,7 +209,7 @@ class TrafficGraphView @JvmOverloads constructor(
         canvas.drawLine(padL, baseY, w - padR, baseY, baselinePaint)
 
         // データがない場合
-        if (wifiRates.isEmpty()) {
+        if (wifiRates.isEmpty() && simRates.isEmpty() && pairShareRates.isEmpty()) {
             if (!barMode) {
                 canvas.drawText(
                     "接続するとデータが表示されます",
@@ -212,6 +230,7 @@ class TrafficGraphView @JvmOverloads constructor(
         } else {
             drawPolyline(canvas, wifiRates, plotMax, padL, padT, graphW, plotH, plotPadT, wifiLinePaint)
             drawPolyline(canvas, simRates,  plotMax, padL, padT, graphW, plotH, plotPadT, simLinePaint)
+            drawPolyline(canvas, pairShareRates, plotMax, padL, padT, graphW, plotH, plotPadT, pairShareLinePaint)
         }
 
         canvas.restore()

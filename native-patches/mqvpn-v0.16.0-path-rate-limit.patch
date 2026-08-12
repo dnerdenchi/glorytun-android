@@ -1,0 +1,161 @@
+diff --git a/android/sdk-native/src/main/jni/mqvpn_jni.c b/android/sdk-native/src/main/jni/mqvpn_jni.c
+index e0c173c..f79213b 100644
+--- a/android/sdk-native/src/main/jni/mqvpn_jni.c
++++ b/android/sdk-native/src/main/jni/mqvpn_jni.c
+@@ -717,6 +717,20 @@ JNI_FN(removePath)(JNIEnv *env, jobject thiz, jlong client, jlong pathHandle)
+                                     (mqvpn_path_handle_t)pathHandle);
+ }
+ 
++/* setPathRateLimit(client, pathHandle, bytesPerSecond) -> int */
++JNIEXPORT jint JNICALL
++JNI_FN(setPathRateLimit)(JNIEnv *env, jobject thiz, jlong client, jlong pathHandle,
++                         jlong bytesPerSecond)
++{
++    (void)env;
++    (void)thiz;
++    if (bytesPerSecond < 0) return MQVPN_ERR_INVALID_ARG;
++    return mqvpn_client_set_path_rate_limit(
++        (mqvpn_client_t *)(intptr_t)client,
++        (mqvpn_path_handle_t)pathHandle,
++        (uint64_t)bytesPerSecond);
++}
++
+ /* ════════════════════════════════════════════════════════════════════════════
+  *  I/O feed
+  * ════════════════════════════════════════════════════════════════════════════ */
+diff --git a/include/libmqvpn.h b/include/libmqvpn.h
+index 4b8443b..5ce3200 100644
+--- a/include/libmqvpn.h
++++ b/include/libmqvpn.h
+@@ -685,6 +685,15 @@ MQVPN_API mqvpn_path_handle_t mqvpn_client_add_path_fd_with_outcome(
+ 
+ MQVPN_API int mqvpn_client_remove_path(mqvpn_client_t *client, mqvpn_path_handle_t path);
+ 
++/*
++ * Set a path-local transmit ceiling in bytes per second.
++ * A value of 0 disables the ceiling. The limit is enforced by the client
++ * before each UDP send and may be changed while the path is active.
++ */
++MQVPN_API int mqvpn_client_set_path_rate_limit(mqvpn_client_t *client,
++                                               mqvpn_path_handle_t path,
++                                               uint64_t bytes_per_sec);
++
+ /*
+  * Drop a path slot on platform-detected removal (carrier loss, RTM_DELLINK,
+  * address loss). Moves the slot to the CLOSED_DROPPED cleanup state and emits
+diff --git a/src/mqvpn_client.c b/src/mqvpn_client.c
+index 11d0284..fb4771f 100644
+--- a/src/mqvpn_client.c
++++ b/src/mqvpn_client.c
+@@ -572,6 +572,42 @@ find_path_by_handle(mqvpn_client_t *c, mqvpn_path_handle_t h)
+     return NULL;
+ }
+ 
++static uint64_t
++path_rate_burst_bytes(const path_entry_t *p)
++{
++    uint64_t burst = p->rate_limit_bytes_per_sec / 10;
++    return burst < 4096 ? 4096 : burst;
++}
++
++static int
++path_rate_allow(mqvpn_client_t *c, path_entry_t *p, size_t size)
++{
++    if (!p || p->rate_limit_bytes_per_sec == 0) return 1;
++
++    uint64_t now = client_now_us(c);
++    uint64_t burst = path_rate_burst_bytes(p);
++    if ((uint64_t)size > burst) burst = (uint64_t)size;
++    if (p->rate_limit_last_refill_us == 0 || now < p->rate_limit_last_refill_us) {
++        p->rate_limit_tokens = burst;
++        p->rate_limit_last_refill_us = now;
++    } else if (now > p->rate_limit_last_refill_us) {
++        uint64_t elapsed = now - p->rate_limit_last_refill_us;
++        uint64_t added;
++        if (elapsed > UINT64_MAX / p->rate_limit_bytes_per_sec) {
++            added = burst;
++        } else {
++            added = elapsed * p->rate_limit_bytes_per_sec / 1000000ULL;
++        }
++        p->rate_limit_tokens =
++            added >= burst - p->rate_limit_tokens ? burst : p->rate_limit_tokens + added;
++        p->rate_limit_last_refill_us = now;
++    }
++
++    if (p->rate_limit_tokens < size) return 0;
++    p->rate_limit_tokens -= size;
++    return 1;
++}
++
+ /* Returns the index of the first active path slot, or -1 if none. */
+ static int
+ first_active_idx(const mqvpn_client_t *c)
+@@ -1106,6 +1142,7 @@ cb_write_socket(const unsigned char *buf, size_t size, const struct sockaddr *pe
+         active_idx = first_active_idx(c);
+     int fd = (active_idx >= 0) ? c->paths[active_idx].fd : -1;
+     if (fd < 0) return XQC_SOCKET_ERROR;
++    if (!path_rate_allow(c, &c->paths[active_idx], size)) return XQC_SOCKET_EAGAIN;
+ 
+     ssize_t res;
+     do {
+@@ -1131,6 +1168,8 @@ cb_write_socket_ex(uint64_t path_id, const unsigned char *buf, size_t size,
+     mqvpn_client_t *c = conn->client;
+     int fd = get_fd_for_path(c, path_id);
+     if (fd < 0) return path_send_dead_retcode(c);
++    path_entry_t *rate_path = get_path_entry_for_send(c, path_id);
++    if (!path_rate_allow(c, rate_path, size)) return XQC_SOCKET_EAGAIN;
+ 
+     ssize_t res;
+     do {
+@@ -1161,6 +1200,16 @@ cb_write_mmsg_ex(uint64_t path_id, const struct iovec *msg_iov, unsigned int vle
+     path_entry_t *p = get_path_entry_for_send(c, path_id);
+     if (!p || p->fd < 0) return path_send_dead_retcode(c);
+ 
++    size_t batch_bytes = 0;
++    for (unsigned int i = 0; i < vlen; i++) {
++        if (SIZE_MAX - batch_bytes < msg_iov[i].iov_len) {
++            batch_bytes = SIZE_MAX;
++            break;
++        }
++        batch_bytes += msg_iov[i].iov_len;
++    }
++    if (!path_rate_allow(c, p, batch_bytes)) return XQC_SOCKET_EAGAIN;
++
+     mqvpn_tx_counters_t tx = {0};
+     int was_gso = !p->gso_disabled;
+     ssize_t r = mqvpn_udp_send_batch(p->fd, msg_iov, vlen, peer, peerlen,
+@@ -3273,6 +3322,20 @@ mqvpn_client_remove_path(mqvpn_client_t *c, mqvpn_path_handle_t path)
+     return MQVPN_OK;
+ }
+ 
++int
++mqvpn_client_set_path_rate_limit(mqvpn_client_t *c, mqvpn_path_handle_t path,
++                                 uint64_t bytes_per_sec)
++{
++    if (!c) return MQVPN_ERR_INVALID_ARG;
++    ASSERT_TICK_THREAD(c);
++    path_entry_t *p = find_path_by_handle(c, path);
++    if (!p) return MQVPN_ERR_INVALID_ARG;
++    p->rate_limit_bytes_per_sec = bytes_per_sec;
++    p->rate_limit_tokens = bytes_per_sec == 0 ? 0 : path_rate_burst_bytes(p);
++    p->rate_limit_last_refill_us = client_now_us(c);
++    return MQVPN_OK;
++}
++
+ int
+ mqvpn_client_drop_path(mqvpn_client_t *c, mqvpn_path_handle_t handle)
+ {
+diff --git a/src/path_entry_internal.h b/src/path_entry_internal.h
+index e859aca..eb86584 100644
+--- a/src/path_entry_internal.h
++++ b/src/path_entry_internal.h
+@@ -64,6 +64,9 @@ typedef struct path_entry_s {
+     int srtt_ms;
+     uint64_t bytes_tx;
+     uint64_t bytes_rx;
++    uint64_t rate_limit_bytes_per_sec;
++    uint64_t rate_limit_tokens;
++    uint64_t rate_limit_last_refill_us;
+     uint64_t recreate_after_us;
+     int recreate_retries;
+     uint64_t path_stable_since_us;

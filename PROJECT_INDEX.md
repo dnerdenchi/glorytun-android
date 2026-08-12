@@ -2,7 +2,7 @@
 
 ## 概要
 
-BondVPN は Android `VpnService` 上で mqvpn を動かす VPN アプリ。glorytun 依存の C/JNI/libsodium ツリーは削除し、mqvpn Android SDK source と公式 v0.7.0 由来の `libmqvpn_jni.so` を使う構成に変更した。
+BondVPN は Android `VpnService` 上で mqvpn を動かす VPN アプリ。glorytun 依存の C/JNI/libsodium ツリーは削除し、mqvpn Android SDK source と v0.16.0 ベースの `libmqvpn_jni.so` を使う構成に変更した。
 
 ## 重要な設計境界
 
@@ -11,7 +11,7 @@ BondVPN は Android `VpnService` 上で mqvpn を動かす VPN アプリ。glory
 | app → mqvpn config | `app/src/main/java/com/example/glorytun/MqvpnConfigFactory.kt` | プロファイル設定を `MqvpnConfig` に変換する |
 | VPN service | `app/src/main/java/com/example/glorytun/MqvpnBondingService.kt` | `MqvpnVpnService` を継承し、TUN 作成、通知、状態 broadcast、統計 broadcast を担当する |
 | mqvpn SDK | `app/src/main/java/com/mqvpn/sdk/` | 公式 mqvpn Android SDK source。更新時はこの subtree を差し替える |
-| mqvpn native | `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` | 公式 mqvpn sample APK 由来の native bridge |
+| mqvpn native | `app/src/main/jniLibs/arm64-v8a/libmqvpn_jni.so` | mqvpn v0.16.0 + 経路別帯域上限パッチ |
 
 UI から `com.mqvpn.sdk.*` を直接広く参照しない。mqvpn の API 変更が来た場合は `MqvpnConfigFactory` / `MqvpnBondingService` / SDK subtree の差し替えで収める。
 

@@ -13,6 +13,12 @@ import com.mqvpn.sdk.network.PathBinder
 import com.mqvpn.sdk.runtime.MqvpnExecutor
 import java.util.concurrent.ConcurrentHashMap
 
+internal inline fun callNativeRateLimitSafely(call: () -> Int): Int? = try {
+    call()
+} catch (_: UnsatisfiedLinkError) {
+    null
+}
+
 /**
  * Bridges [NetworkEvent]s from NetworkMonitor to libmqvpn path management.
  *
@@ -151,8 +157,12 @@ internal class PathManager(
     private fun applyPathRateLimit(handle: Long, bytesPerSecond: Long) {
         udpReaderPool.updateRateLimit(handle, bytesPerSecond)
         executor.enqueue {
-            val result = tunnel.setPathRateLimit(handle, bytesPerSecond)
-            if (result != 0) {
+            val result = callNativeRateLimitSafely {
+                tunnel.setPathRateLimit(handle, bytesPerSecond)
+            }
+            if (result == null) {
+                Log.e(TAG, "Native engine does not support per-path rate limits; uplink cap skipped")
+            } else if (result != 0) {
                 Log.w(TAG, "Native rate limit failed for path=$handle: $result")
             }
         }
